@@ -196,7 +196,7 @@ function GameApp() {
           <div className="map-caption"><span><i /> ПОЛЕ {game.size} × {game.size}</span><span>СИД · {game.seed}</span></div>
           <MapView game={game} selected={selectedPosition} onTileClick={selectTile} />
           <div className="map-legend"><span><i className="legend-human" />ТВОЯ КОМАНДА</span><span><i className="legend-enemy" />ИИ-КОРПОРАЦИЯ</span><span><i className="legend-neutral" />БЕСХОЗНАЯ БАЗА</span><span>◌ ТУМАН ВОЙНЫ</span></div>
-          <div className="map-tip">ЩЁЛКНИ ПО СВОЕМУ ЮНИТУ, ЗАТЕМ ПО КЛЕТКЕ ДЛЯ ПЕРЕМЕЩЕНИЯ · Нажми «Конец хода», когда готов</div>
+          <div className="map-tip">ВЫБЕРИ ГЕРОЯ И НАЖМИ НА ГОЛУБУЮ КЛЕТКУ ДЛЯ ХОДА · Закрепи за собой все базы</div>
         </div>
         <aside className="sidebar">
           <div className="faction-banner"><div><span className="mini-label">ТВОЯ ФРАКЦИЯ</span><strong>{game.playerFaction === "lorgoshki" ? "🧑‍💻 Лоргошки" : "🤖 Роботы"}</strong></div><span className="turn-number">#{game.turn.toString().padStart(2, "0")}</span></div>

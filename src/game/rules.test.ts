@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createIsometricGrid, screenToTile, tileCenter } from "./isometric";
 import { createGame, damage, incomeForRank, progressToNextRank, revealAround, shortestPath } from "./rules";
 
 describe("game rules", () => {
@@ -77,5 +78,21 @@ describe("game rules", () => {
 
     expect(game.tiles[15].visible).toBe(false);
     expect(game.tiles[0].visible).toBe(true);
+  });
+
+  it("maps screen clicks back to isometric grid coordinates", () => {
+    for (const [width, height, size] of [[504, 430, 16], [355, 320, 24], [880, 600, 32]]) {
+      const grid = createIsometricGrid(width, height, size);
+      expect(tileCenter(grid, 0, 0).x).toBe(width / 2);
+      expect(tileCenter(grid, size - 1, size - 1).x).toBe(width / 2);
+      for (const x of [0, Math.floor(size / 2), size - 1]) {
+        for (const y of [0, Math.floor(size / 2), size - 1]) {
+          expect(screenToTile(grid, tileCenter(grid, x, y))).toEqual({ x, y });
+        }
+      }
+    }
+
+    const grid = createIsometricGrid(504, 430, 16);
+    expect(screenToTile(grid, { x: 0, y: 0 })).toBeNull();
   });
 });

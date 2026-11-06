@@ -1,16 +1,16 @@
 :root {
   color-scheme: dark;
-  --ink: #e8e4d8;
-  --muted: #8b9183;
-  --faint: #585f55;
-  --bg: #111512;
-  --panel: #191e19;
-  --panel-raised: #20251f;
-  --stroke: #333a31;
-  --amber: #f0bc60;
-  --orange: #e69b4c;
-  --green: #81a17a;
-  --coral: #e77a68;
+  --ink: #f3edff;
+  --muted: #abb0d5;
+  --faint: #72799d;
+  --bg: #111224;
+  --panel: #191a32;
+  --panel-raised: #222440;
+  --stroke: #38385d;
+  --amber: #ffcb55;
+  --orange: #ff9466;
+  --green: #59edb1;
+  --coral: #ff6588;
   --mono: "Cascadia Code", "Courier New", monospace;
   --sans: "Segoe UI", Arial, sans-serif;
   --display: "Bahnschrift", "Segoe UI", sans-serif;
@@ -272,15 +272,16 @@ kbd { padding: 3px 6px; border: 1px solid #464a3d; color: #c9b57a; font: inherit
 .game-screen {
   min-height: 100vh;
   padding: 0 28px 10px;
-  background: radial-gradient(ellipse at 34% 48%, #19201b 0, transparent 52%), #111512;
+  background: radial-gradient(ellipse at 32% 46%, #232040 0, transparent 53%), #111224;
 }
 
 .game-header {
   min-height: 65px;
-  border-bottom: 1px solid #31372f;
+  border-bottom: 1px solid #343552;
+  background: #111224c9;
 }
 
-.game-brand { display: flex; align-items: center; gap: 10px; color: #e6e1d3; font: 600 11px var(--display); letter-spacing: .08em; text-decoration: none; }
+.game-brand { display: flex; align-items: center; gap: 10px; color: #f0eafa; font: 600 11px var(--display); letter-spacing: .08em; text-decoration: none; }
 .game-brand .brand-mark { width: 30px; height: 30px; }
 .game-brand small { display: block; margin-top: 3px; color: #899081; font: 8px var(--mono); letter-spacing: .1em; }
 .turn-indicator { display: flex; align-items: center; gap: 9px; color: #e0d4ad; font: 9px var(--mono); letter-spacing: .08em; }
@@ -321,11 +322,12 @@ kbd { padding: 3px 6px; border: 1px solid #464a3d; color: #c9b57a; font: inherit
 .map-canvas {
   position: relative;
   width: 100%;
-  height: clamp(360px, calc(100vh - 330px), 615px);
+  height: clamp(480px, calc(100vh - 224px), 780px);
   min-height: 340px;
   overflow: hidden;
-  border: 1px solid #434c40;
-  background: #111a18;
+  border: 1px solid #5b5484;
+  background: #11132b;
+  box-shadow: inset 0 0 70px #17163788, 0 0 36px #7864ff14;
 }
 
 .map-canvas canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
@@ -351,8 +353,9 @@ kbd { padding: 3px 6px; border: 1px solid #464a3d; color: #c9b57a; font: inherit
   padding: 13px 14px 12px;
   display: flex;
   flex-direction: column;
-  border: 1px solid #353c33;
-  background: linear-gradient(160deg, #1a1f1a, #171c18 74%);
+  border: 1px solid #393957;
+  background: linear-gradient(160deg, #1c1d38, #18192e 74%);
+  box-shadow: 0 16px 48px #08091855;
 }
 
 .faction-banner { min-height: 45px; display: flex; align-items: center; justify-content: space-between; }
@@ -373,7 +376,7 @@ kbd { padding: 3px 6px; border: 1px solid #464a3d; color: #c9b57a; font: inherit
 
 .section-title > span:last-child { color: #777e71; font-size: 7px; }
 .economy-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; padding: 10px 0 5px; }
-.economy-card { min-height: 57px; padding: 7px 8px; display: grid; grid-template-columns: 17px 1fr; align-items: center; gap: 2px 6px; background: #20251f; }
+.economy-card { min-height: 57px; padding: 7px 8px; display: grid; grid-template-columns: 17px 1fr; align-items: center; gap: 2px 6px; background: #24253f; }
 .economy-card > span { grid-row: 1 / 3; color: var(--amber); font-size: 15px; }
 .economy-card small { color: #8d9183; font: 7px var(--mono); letter-spacing: .06em; }
 .economy-card strong { color: #efe7d5; font: 600 14px var(--display); }
@@ -386,7 +389,7 @@ kbd { padding: 3px 6px; border: 1px solid #464a3d; color: #c9b57a; font: inherit
 .object-heading strong { color: #e5dfce; font: 600 11px var(--display); }
 .object-heading small { color: #8c9283; font: 7px var(--mono); letter-spacing: .04em; }
 .progress-copy, .recruit-heading { margin-top: 10px; display: flex; justify-content: space-between; color: #969787; font-size: 7px; }
-.progress-track { height: 3px; margin-top: 6px; background: #363b30; }
+.progress-track { height: 3px; margin-top: 6px; background: #393a5b; }
 .progress-track > span { height: 100%; display: block; background: linear-gradient(90deg, #bd8c43, #efd27c); }
 .recruit-heading { margin-top: 10px; }
 .recruit-list { max-height: 133px; margin-top: 6px; overflow-y: auto; }
@@ -473,7 +476,7 @@ kbd { padding: 3px 6px; border: 1px solid #464a3d; color: #c9b57a; font: inherit
   .game-screen { padding-right: 14px; padding-left: 14px; }
   .game-layout { grid-template-columns: minmax(0, 1fr) 315px; gap: 12px; }
   .sidebar { padding-right: 11px; padding-left: 11px; }
-  .map-canvas { height: clamp(365px, calc(100vh - 340px), 600px); }
+  .map-canvas { height: clamp(490px, calc(100vh - 235px), 760px); }
   .map-legend { gap: 9px 12px; font-size: 7px; }
 }
 
@@ -505,7 +508,7 @@ kbd { padding: 3px 6px; border: 1px solid #464a3d; color: #c9b57a; font: inherit
   .leave-button { min-height: 27px; padding: 0 6px; font-size: 7px; }
   .game-layout { padding-top: 11px; grid-template-columns: 1fr; gap: 9px; }
   .map-caption { height: 22px; font-size: 8px; }
-  .map-canvas { height: min(82vw, 440px); min-height: 280px; }
+  .map-canvas { height: min(112vw, 520px); min-height: 390px; }
   .map-legend { min-height: 34px; gap: 8px 13px; font-size: 7px; }
   .map-tip { margin-bottom: 3px; font-size: 7px; line-height: 1.4; }
   .sidebar { padding: 10px; }
