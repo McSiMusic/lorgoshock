@@ -1,18 +1,83 @@
 import { describe, expect, it } from "vitest";
 import { createIsometricGrid, screenToTile, tileCenter } from "./isometric";
 import { MAP_SIZES } from "./model";
-import { createGame, damage, incomeForRank, progressToNextRank, revealAround, shortestPath } from "./rules";
+import { makeIdentity } from "./names";
+import {
+  canHarvestWithinCity,
+  canAttack,
+  cityCapacity,
+  cityOccupancy,
+  createGame,
+  damage,
+  expandResourceArea,
+  incomeForRank,
+  gridDistance,
+  progressToNextRank,
+  revealAround,
+  resourceCity,
+  shortestPath,
+} from "./rules";
 
 describe("game rules", () => {
+  it("assigns courier names matching their stable male or female appearance", () => {
+    const men = ["Мирон", "Адам", "Теодор", "Серафим", "Платон", "Тихон", "Прохор", "Марсель"];
+    const women = ["Мия", "Мирослава", "Агата", "Аврора", "Афина", "Злата", "Адель", "Есения"];
+    const names = Array.from({ length: 32 }, (_, i) => makeIdentity("names", `courier-${i}`, "lorgoshki", "courier", []));
+    expect(names.some((identity) => identity.gender === "male")).toBe(true);
+    expect(names.some((identity) => identity.gender === "female")).toBe(true);
+    for (const identity of names) expect(identity.gender === "male" ? men : women).toContain(identity.name.ru);
+    expect(makeIdentity("names", "courier-1", "lorgoshki", "courier", [])).toEqual(names[1]);
+  });
   it("creates the same balanced world for the same seed", () => {
     const first = createGame("test-seed", 16, "lorgoshki");
     const second = createGame("test-seed", 16, "lorgoshki");
 
     expect(first.tiles).toEqual(second.tiles);
-    expect(first.bases.filter((base) => base.owner === null)).toHaveLength(4);
+    expect(first.bases).toHaveLength(8);
+    expect(first.bases.filter((base) => base.owner === null)).toHaveLength(6);
     expect(first.units).toHaveLength(2);
     expect(first.units[0].x).toBe(2);
     expect(first.units[1].x).toBe(13);
+  });
+
+  it.each(MAP_SIZES)("generates connected, spaced worlds of size %i across many seeds", (size) => {
+    const scale = size * size / 256;
+    for (let seed = 0; seed < 300; seed++) {
+      const game = createGame(`world-${seed}`, size, "lorgoshki");
+      const neutral = game.bases.filter((base) => base.owner === null);
+      const coffee = game.tiles.filter((tile) => tile.poi === "coffee");
+      expect(neutral.length).toBe(Math.round(6 * scale));
+      expect(coffee.length).toBeGreaterThanOrEqual(Math.round(4 * scale));
+      expect(coffee.length).toBeLessThanOrEqual(Math.round(5 * scale));
+      for (const [index, shop] of coffee.entries()) {
+        expect(shop.x).toBeGreaterThan(0);
+        expect(shop.y).toBeGreaterThan(0);
+        expect(shop.x).toBeLessThan(size - 1);
+        expect(shop.y).toBeLessThan(size - 1);
+        for (const other of coffee.slice(index + 1)) expect(gridDistance(shop, other)).toBeGreaterThanOrEqual(3);
+        for (const base of game.bases) expect(gridDistance(shop, base)).toBeGreaterThanOrEqual(2);
+      }
+      for (const [index, base] of game.bases.entries()) {
+        expect(base.x).toBeGreaterThan(0);
+        expect(base.y).toBeGreaterThan(0);
+        expect(base.x).toBeLessThan(size - 1);
+        expect(base.y).toBeLessThan(size - 1);
+        for (const other of game.bases.slice(index + 1)) expect(gridDistance(base, other)).toBeGreaterThanOrEqual(3);
+      }
+      const visited = new Set([`${game.bases[0].x},${game.bases[0].y}`]);
+      const queue = [{ x: game.bases[0].x, y: game.bases[0].y }];
+      for (let i = 0; i < queue.length; i++) {
+        const { x, y } = queue[i];
+        for (const [dx, dy] of [[0, 1], [1, 0], [0, -1], [-1, 0]]) {
+          const nx = x + dx, ny = y + dy, key = `${nx},${ny}`;
+          if (nx < 0 || ny < 0 || nx >= size || ny >= size || visited.has(key) || game.tiles[ny * size + nx].terrain === "water") continue;
+          visited.add(key);
+          queue.push({ x: nx, y: ny });
+        }
+      }
+      for (const object of [...game.bases, ...coffee]) expect(visited.has(`${object.x},${object.y}`)).toBe(true);
+    }
+    expect(createGame("different-a", size, "lorgoshki").tiles).not.toEqual(createGame("different-b", size, "lorgoshki").tiles);
   });
 
   it("limits map generation to supported sizes no larger than 32", () => {
@@ -43,6 +108,83 @@ describe("game rules", () => {
     expect(game.tiles[playerBase.y * game.size + playerBase.x].visible).toBe(true);
   });
 
+  it("reveals square areas and keeps explored cells permanently explored", () => {
+    const game = createGame("square-fog", 16, "lorgoshki");
+    const diagonal = game.tiles[4 * game.size + 4];
+    expect(diagonal.visible).toBe(true);
+
+    diagonal.visible = false;
+    diagonal.explored = true;
+    game.units = [];
+    game.bases = game.bases.filter((base) => base.owner !== game.playerFaction);
+    revealAround(game);
+    expect(diagonal.visible).toBe(false);
+    expect(diagonal.explored).toBe(true);
+  });
+
+  it("reveals only the neighboring 3x3 area around units, independent of combat range", () => {
+    const game = createGame("unit-vision", 16, "lorgoshki");
+    const unit = game.units[0];
+    Object.assign(unit, { x: 8, y: 8, kind: "courier" });
+    game.tech.lorgoshki[1] = 3;
+    revealAround(game);
+    expect(game.tiles[9 * game.size + 9].visible).toBe(true);
+    expect(game.tiles[10 * game.size + 8].visible).toBe(false);
+    expect(game.tiles[2 * game.size + 4].visible).toBe(true);
+  });
+
+  it("reveals a radius of three from mountains and retains exploration after leaving", () => {
+    const game = createGame("mountain-vision", 16, "lorgoshki");
+    const unit = game.units[0];
+    Object.assign(unit, { x: 8, y: 8 });
+    game.tiles[8 * game.size + 8].terrain = "mountain";
+    revealAround(game);
+    const distant = game.tiles[11 * game.size + 11];
+    expect(distant.visible).toBe(true);
+    expect(game.tiles[12 * game.size + 12].visible).toBe(false);
+    Object.assign(unit, { x: 7, y: 7 });
+    game.tiles[7 * game.size + 7].terrain = "plain";
+    revealAround(game);
+    expect(distant.visible).toBe(false);
+    expect(distant.explored).toBe(true);
+  });
+
+  it("identifies only visible unclaimed resources inside an uncontested owned city", () => {
+    const game = createGame("resource-glow", 16, "lorgoshki");
+    const base = game.bases[0];
+    const tile = game.tiles[base.y * game.size + base.x + 1];
+    Object.assign(tile, { terrain: "forest", poi: null, poiClaimed: false, geese: false, visible: true });
+    game.tokens.lorgoshki = 0;
+    expect(resourceCity(game, tile)?.id).toBe(base.id);
+    base.resourceRange = 3;
+    const outside = game.tiles[base.y * game.size + base.x + 2];
+    Object.assign(outside, { terrain: "forest", poi: null, poiClaimed: false, visible: true });
+    expect(resourceCity(game, outside)).toBeUndefined();
+    base.resourceRange = 5;
+    expect(resourceCity(game, outside)?.id).toBe(base.id);
+    tile.visible = false;
+    expect(resourceCity(game, tile)).toBeUndefined();
+    tile.visible = true;
+    tile.poiClaimed = true;
+    expect(resourceCity(game, tile)).toBeUndefined();
+    base.capture = { unitId: "enemy", faction: game.botFaction, readyTurn: 2 };
+    expect(resourceCity(game, outside)).toBeUndefined();
+  });
+
+  it("limits resource collection to a city 3x3 area until a 10-token expansion", () => {
+    const game = createGame("resource-range", 16, "lorgoshki");
+    const base = game.bases.find((candidate) => candidate.owner === game.playerFaction)!;
+    expect(canHarvestWithinCity(base, { x: base.x + 1, y: base.y + 1 })).toBe(true);
+    expect(canHarvestWithinCity(base, { x: base.x + 2, y: base.y })).toBe(false);
+    expect(expandResourceArea(game, base.id)).toBe(false);
+    game.tokens[game.playerFaction] = 10;
+    expect(expandResourceArea(game, base.id)).toBe(true);
+    expect(game.tokens[game.playerFaction]).toBe(0);
+    expect(base.resourceRange).toBe(5);
+    expect(canHarvestWithinCity(base, { x: base.x + 2, y: base.y + 2 })).toBe(true);
+    expect(expandResourceArea(game, base.id)).toBe(false);
+  });
+
   it("assigns the chosen faction the matching opponent", () => {
     const game = createGame("robots", 16, "robots");
     expect(game.playerFaction).toBe("robots");
@@ -65,6 +207,48 @@ describe("game rules", () => {
     expect(damage(junior, robot, game)).toBe(5);
   });
 
+  it("measures city capacity per city, not across the whole faction", () => {
+    const game = createGame("capacity", 16, "robots");
+    const base = game.bases[0];
+    expect(cityCapacity(base)).toBe(2);
+    expect(cityOccupancy(game, base)).toBe(1);
+    game.units.push({ ...game.units[0], id: "another" });
+    expect(cityOccupancy(game, base)).toBe(2);
+    base.rank = 3;
+    expect(cityCapacity(base)).toBe(4);
+    game.units[0].x++;
+    expect(cityOccupancy(game, base)).toBe(2);
+    game.units[0].homeBaseId = null;
+    expect(cityOccupancy(game, base)).toBe(1);
+  });
+
+  it("identifies targets for the selected attacker, both factions, range and attack state", () => {
+    for (const faction of ["robots", "lorgoshki"] as const) {
+      const game = createGame("attack-target", 16, faction);
+      const [attacker, defender] = game.units;
+      defender.x = attacker.x + 1;
+      defender.y = attacker.y + 1;
+      revealAround(game);
+      expect(canAttack(game, attacker, defender)).toBe(true);
+      attacker.attacked = true;
+      expect(canAttack(game, attacker, defender)).toBe(false);
+      attacker.attacked = false;
+      defender.x += 1;
+      expect(canAttack(game, attacker, defender)).toBe(false);
+      game.tech[faction][1] = 1;
+      revealAround(game);
+      expect(canAttack(game, attacker, defender)).toBe(true);
+      game.tiles[defender.y * game.size + defender.x].visible = false;
+      expect(canAttack(game, attacker, defender)).toBe(true);
+      game.tiles[defender.y * game.size + defender.x].explored = false;
+      expect(canAttack(game, attacker, defender)).toBe(false);
+      game.tiles[defender.y * game.size + defender.x].visible = true;
+      game.tiles[defender.y * game.size + defender.x].explored = true;
+      attacker.kind = faction === "robots" ? "drone" : "junior";
+      if (faction === "robots") expect(canAttack(game, attacker, defender)).toBe(true);
+    }
+  });
+
   it("finds paths and rejects water and unreachable destinations", () => {
     const game = createGame("path", 16, "lorgoshki");
     game.tiles = game.tiles.map((tile) => ({ ...tile, terrain: "plain" }));
@@ -80,6 +264,14 @@ describe("game rules", () => {
       if (index % game.size === 1) tile.terrain = "water";
     });
     expect(shortestPath(game, { x: 0, y: 0 }, { x: 2, y: 0 })).toBeNull();
+  });
+
+  it("moves diagonally in one step without cutting across blocked corners", () => {
+    const game = createGame("diagonal-path", 16, "lorgoshki");
+    game.tiles = game.tiles.map((tile) => ({ ...tile, terrain: "plain" }));
+    expect(shortestPath(game, { x: 2, y: 2 }, { x: 3, y: 3 }, 1)).toEqual([{ x: 3, y: 3 }]);
+    game.tiles[2 * game.size + 3].terrain = "water";
+    expect(shortestPath(game, { x: 2, y: 2 }, { x: 3, y: 3 }, 1)).toBeNull();
   });
 
   it("keeps explored fog and only reveals the player's units", () => {
@@ -112,6 +304,7 @@ describe("game rules", () => {
   it("maps screen clicks back to isometric grid coordinates", () => {
     for (const [width, height, size] of [[504, 430, 16], [355, 320, 24], [880, 600, 32]]) {
       const grid = createIsometricGrid(width, height, size);
+      expect(grid.tileHeight / grid.tileWidth).toBe(0.5);
       expect(tileCenter(grid, 0, 0).x).toBe(width / 2);
       expect(tileCenter(grid, size - 1, size - 1).x).toBe(width / 2);
       for (const x of [0, Math.floor(size / 2), size - 1]) {

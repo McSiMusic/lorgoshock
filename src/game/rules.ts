@@ -1,5 +1,4 @@
 import {
-  FACTION_NAMES,
   MAP_SIZES,
   UNIT_DEFINITIONS,
   type Base,
@@ -10,6 +9,7 @@ import {
   type Unit,
   type UnitKind,
 } from "./model";
+import { makeCityName, makeIdentity } from "./names";
 
 export function seededRandom(seed: string): () => number {
   let state = 0x811c9dc5;
@@ -41,13 +41,74 @@ export function progressToNextRank(rank: number): number {
   return rank >= 4 ? 4 : rank + 1;
 }
 
+export function gridDistance(first: { x: number; y: number }, second: { x: number; y: number }): number {
+  return Math.max(Math.abs(first.x - second.x), Math.abs(first.y - second.y));
+}
+
+export function movementRange(state: Pick<GameState, "turn">, unit: Unit): number {
+  return UNIT_DEFINITIONS[unit.kind].move * (unit.coffeeBoostTurn === state.turn ? 2 : 1);
+}
+
+export function cityCapacity(base: Base): number {
+  return base.rank + 1;
+}
+
+export function cityOccupancy(state: Pick<GameState, "units">, base: Base): number {
+  return state.units.filter((unit) => unit.homeBaseId === base.id && unit.faction === base.owner).length;
+}
+
+export function canAttack(state: GameState, attacker: Unit, defender: Unit): boolean {
+  const tile = state.tiles[defender.y * state.size + defender.x];
+  return state.status === "running"
+    && attacker.faction !== defender.faction && !attacker.attacked
+    && UNIT_DEFINITIONS[attacker.kind].attack > 0
+    && (attacker.faction !== state.playerFaction || Boolean(tile?.explored))
+    && gridDistance(attacker, defender) <= UNIT_DEFINITIONS[attacker.kind].range + state.tech[attacker.faction][1];
+}
+
+export function canHarvestWithinCity(base: Base, tile: { x: number; y: number }): boolean {
+  return gridDistance(base, tile) <= Math.floor(base.resourceRange / 2);
+}
+
+export function resourceCost(tile: Tile): number | null {
+  if (tile.poiClaimed || tile.poi) return null;
+  if (tile.terrain === "forest") return 2;
+  if (tile.geese) return 3;
+  if (tile.terrain === "mountain" || tile.terrain === "water") return 5;
+  return null;
+}
+
+export function resourceCity(state: GameState, tile: Tile, preferredBaseId?: string | null): Base | undefined {
+  if (!tile.visible || resourceCost(tile) === null
+    || state.bases.some((city) => city.x === tile.x && city.y === tile.y)
+    || state.units.some((unit) => unit.x === tile.x && unit.y === tile.y && unit.faction !== state.playerFaction)) return undefined;
+  const eligible = state.bases.filter((base) => base.owner === state.playerFaction
+    && !base.capture && canHarvestWithinCity(base, tile));
+  return eligible.find((base) => base.id === preferredBaseId) ?? eligible[0];
+}
+
+export function canHarvest(state: GameState, base: Base, tile: Tile, faction: Faction = state.playerFaction): boolean {
+  const cost = resourceCost(tile);
+  return state.status === "running" && base.owner === faction
+    && !base.capture && (faction !== state.playerFaction || tile.visible) && canHarvestWithinCity(base, tile)
+    && !state.bases.some((city) => city.x === tile.x && city.y === tile.y)
+    && !state.units.some((unit) => unit.x === tile.x && unit.y === tile.y && unit.faction !== faction)
+    && cost !== null && state.tokens[faction] >= cost;
+}
+
+export function expandResourceArea(state: GameState, baseId: string): boolean {
+  const base = state.bases.find((candidate) => candidate.id === baseId && candidate.owner === state.playerFaction);
+  if (!base || base.resourceRange !== 3 || state.tokens[state.playerFaction] < 10) return false;
+  state.tokens[state.playerFaction] -= 10;
+  base.resourceRange = 5;
+  return true;
+}
+
 export function revealAround(state: Pick<GameState, "tiles" | "size" | "units" | "bases" | "playerFaction" | "tech">): void {
   for (const tile of state.tiles) tile.visible = false;
-  const revealFrom = (origin: { x: number; y: number }) => {
-    const vision = state.tech ? 2 + state.tech[state.playerFaction][1] : 2;
+  const revealFrom = (origin: { x: number; y: number }, vision: number) => {
     for (let dy = -vision; dy <= vision; dy++) {
       for (let dx = -vision; dx <= vision; dx++) {
-        if (Math.abs(dx) + Math.abs(dy) > vision) continue;
         const x = origin.x + dx;
         const y = origin.y + dy;
         if (x < 0 || y < 0 || x >= state.size || y >= state.size) continue;
@@ -60,10 +121,12 @@ export function revealAround(state: Pick<GameState, "tiles" | "size" | "units" |
     }
   };
   for (const unit of state.units) {
-    if (unit.faction === state.playerFaction) revealFrom(unit);
+    if (unit.faction === state.playerFaction) {
+      revealFrom(unit, state.tiles[unit.y * state.size + unit.x]?.terrain === "mountain" ? 3 : 1);
+    }
   }
   for (const base of state.bases) {
-    if (base.owner === state.playerFaction) revealFrom(base);
+    if (base.owner === state.playerFaction) revealFrom(base, 2 + (state.tech?.[state.playerFaction][1] ?? 0));
   }
 }
 
@@ -92,11 +155,19 @@ export function shortestPath(
     const currentDistance = distance.get(key(current.x, current.y)) ?? 0;
     if (currentDistance >= maxSteps) continue;
 
-    for (const [dx, dy] of [[0, -1], [1, 0], [0, 1], [-1, 0]]) {
+    for (const [dx, dy] of [
+      [0, -1], [1, -1], [1, 0], [1, 1],
+      [0, 1], [-1, 1], [-1, 0], [-1, -1],
+    ]) {
       const x = current.x + dx;
       const y = current.y + dy;
-      const tile = state.tiles[y * state.size + x];
+      const tile = inBounds(x, y, state.size) ? state.tiles[y * state.size + x] : undefined;
       if (!inBounds(x, y, state.size) || !tile || tile.terrain === "water") continue;
+      if (dx !== 0 && dy !== 0) {
+        const horizontal = state.tiles[current.y * state.size + x];
+        const vertical = state.tiles[y * state.size + current.x];
+        if (!horizontal || !vertical || horizontal.terrain === "water" || vertical.terrain === "water") continue;
+      }
       const next = key(x, y);
       if (previous.has(next)) continue;
       previous.set(next, key(current.x, current.y));
@@ -142,50 +213,86 @@ export function createGame(seed: string, size: number, playerFaction: Faction): 
       for (let dx = -2; dx <= 2; dx++) {
         if (Math.abs(dx) + Math.abs(dy) > 3) continue;
         const tile = tiles[(start.y + dy) * size + start.x + dx];
-        if (tile) Object.assign(tile, emptyTile(tile.x, tile.y));
+        if (tile?.terrain === "water") tile.terrain = "plain";
       }
     }
   }
 
   const bases: Base[] = [
-    { id: "home-player", ...playerStart, owner: playerFaction, rank: 1, progress: 0 },
-    { id: "home-bot", ...botStart, owner: botFaction, rank: 1, progress: 0 },
+    { id: "home-player", name: makeCityName(seed, "home-player", playerFaction, []), ...playerStart, owner: playerFaction, rank: 1, progress: 0, resourceRange: 3 },
+    { id: "home-bot", name: makeCityName(seed, "home-bot", botFaction, []), ...botStart, owner: botFaction, rank: 1, progress: 0, resourceRange: 3 },
   ];
-  const neutralCount = Math.max(4, Math.floor(size * size / 65));
-
-  for (let index = 0; index < neutralCount; index++) {
-    for (let attempt = 0; attempt < 120; attempt++) {
-      const x = 1 + Math.floor(random() * (size - 2));
-      const y = 1 + Math.floor(random() * (size - 2));
-      const tile = tiles[y * size + x];
-      const farFromStarts = starts.every((start) => Math.abs(x - start.x) + Math.abs(y - start.y) >= 5);
-      const farFromBases = bases.every((base) => Math.abs(x - base.x) + Math.abs(y - base.y) >= 4);
-      if (tile.terrain !== "water" && farFromStarts && farFromBases) {
-        bases.push({ id: `base-${index}`, x, y, owner: null, rank: 1, progress: 0 });
-        Object.assign(tile, emptyTile(x, y));
-        break;
-      }
+  const areaScale = size * size / 256;
+  const neutralCount = Math.round(6 * areaScale);
+  const coffeeCount = Math.round((4 + Math.floor(random() * 2)) * areaScale);
+  const candidates = tiles.filter((tile) => tile.x > 0 && tile.y > 0 && tile.x < size - 1 && tile.y < size - 1);
+  let locations: Tile[] = [];
+  let coffeeLocations: Tile[] = [];
+  for (let attempt = 0; attempt < 1000 && coffeeLocations.length < coffeeCount; attempt++) {
+    const shuffled = [...candidates];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    const chosen: Tile[] = [];
+    for (const tile of shuffled) {
+      if (starts.every((start) => gridDistance(start, tile) >= 3)
+        && chosen.every((other) => gridDistance(other, tile) >= 3)) chosen.push(tile);
+      if (chosen.length === neutralCount) break;
+    }
+    if (chosen.length < neutralCount) continue;
+    const coffees: Tile[] = [];
+    for (const tile of shuffled) {
+      if (starts.every((base) => gridDistance(base, tile) >= 2)
+        && chosen.every((base) => gridDistance(base, tile) >= 2)
+        && coffees.every((coffee) => gridDistance(coffee, tile) >= 3)) coffees.push(tile);
+      if (coffees.length === coffeeCount) break;
+    }
+    if (coffees.length === coffeeCount) {
+      locations = chosen;
+      coffeeLocations = coffees;
     }
   }
-
-  for (let index = 0; index < Math.floor(size / 5); index++) {
-    for (let attempt = 0; attempt < 80; attempt++) {
-      const x = 1 + Math.floor(random() * (size - 2));
-      const y = 1 + Math.floor(random() * (size - 2));
+  if (locations.length !== neutralCount || coffeeLocations.length !== coffeeCount) {
+    throw new Error("Не удалось разместить компании и кофейни на карте.");
+  }
+  for (const [index, tile] of locations.entries()) {
+    const { x, y } = tile;
+    bases.push({ id: `base-${index}`, name: makeCityName(seed, `base-${index}`, null, bases.map((base) => base.name)), x, y, owner: null, rank: 1, progress: 0, resourceRange: 3 });
+    Object.assign(tile, emptyTile(x, y));
+  }
+  for (const tile of coffeeLocations) {
+    Object.assign(tile, emptyTile(tile.x, tile.y));
+    tile.poi = "coffee";
+  }
+  const poiCandidates = candidates.filter((tile) => !tile.poi && !bases.some((base) => base.x === tile.x && base.y === tile.y));
+  for (let i = poiCandidates.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [poiCandidates[i], poiCandidates[j]] = [poiCandidates[j], poiCandidates[i]];
+  }
+  const treasuryCount = Math.round(2 * areaScale);
+  const treasuries = poiCandidates.slice(0, treasuryCount);
+  for (const tile of treasuries) {
+    Object.assign(tile, emptyTile(tile.x, tile.y));
+    tile.poi = "treasury";
+  }
+  for (const destination of [...bases, ...coffeeLocations, ...treasuries]) {
+    let { x, y } = playerStart;
+    while (x !== destination.x || y !== destination.y) {
+      if (x !== destination.x && (y === destination.y || random() < 0.5)) x += Math.sign(destination.x - x);
+      else y += Math.sign(destination.y - y);
       const tile = tiles[y * size + x];
-      if (tile.terrain !== "water" && !bases.some((base) => base.x === x && base.y === y)) {
-        tile.poi = index % 2 === 0 ? "coffee" : "treasury";
-        tile.geese = false;
-        break;
-      }
+      if (tile.terrain === "water") tile.terrain = "plain";
     }
   }
 
   const startFactionUnit = (faction: Faction, kind: Unit["kind"], position: { x: number; y: number }): Unit => ({
     id: `${faction}-1`,
+    ...makeIdentity(seed, `${faction}-1`, faction, kind, []),
     ...position,
     faction,
     kind,
+    homeBaseId: faction === playerFaction ? "home-player" : "home-bot",
     hp: UNIT_DEFINITIONS[kind].maxHp,
     moved: false,
     attacked: false,
@@ -206,9 +313,10 @@ export function createGame(seed: string, size: number, playerFaction: Faction): 
     bases,
     units,
     tech: { lorgoshki: [0, 0, 0], robots: [0, 0, 0] },
-    logs: [`Сид ${seed}. Матч начался — компания Лоргошков против дата-центра.`],
-    inspector: { phases: [], elapsedMs: 0, top: [] },
-    pendingCoffee: null,
+    logs: [],
+    nextEventId: 1,
+    coffeeBreaks: [],
+    coinVisits: [],
     status: "running",
   };
   revealAround(state);
@@ -223,15 +331,19 @@ export function baseName(faction: Faction): string {
   return faction === "lorgoshki" ? "Компания" : "Майнинг-ферма";
 }
 
-export function logEvent(state: GameState, message: string): void {
-  state.logs = [message, ...state.logs].slice(0, 8);
+export function logEvent(state: GameState, ru: string, en: string): void {
+  state.logs = [{ id: state.nextEventId++, ru, en }, ...state.logs].slice(0, 80);
 }
 
-export function transferBase(state: GameState, base: Base, faction: Faction): void {
+export function transferBase(state: GameState, base: Base, faction: Faction, unit: Unit): void {
+  const oldOwner = base.owner;
   base.owner = faction;
+  base.name = makeCityName(state.seed, `${base.id}:${state.turn}`, faction, state.bases.filter((other) => other.id !== base.id).map((other) => other.name));
   base.progress = 0;
-  logEvent(state, `${FACTION_NAMES[faction]} захватывают ${baseName(faction)}.`);
-  const owned = state.bases.filter((item) => item.owner === faction).length;
-  const total = state.bases.length;
-  if (owned === total) state.status = faction === state.playerFaction ? "won" : "lost";
+  if (faction === state.playerFaction || state.tiles[base.y * state.size + base.x]?.visible) {
+    logEvent(state, `${unit.name.ru} открывает «${base.name.ru}».`, `${unit.name.en} opens ${base.name.en}.`);
+  }
+  if (oldOwner && oldOwner !== faction && !state.bases.some((item) => item.owner === oldOwner)) {
+    state.status = faction === state.playerFaction ? "won" : "lost";
+  }
 }

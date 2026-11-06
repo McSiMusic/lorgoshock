@@ -10,14 +10,14 @@ export type IsometricGrid = {
 export function createIsometricGrid(width: number, height: number, size: number): IsometricGrid {
   const tileWidth = Math.max(1, Math.min(
     (width - 32) / (size * 2),
-    (height - 46) / (size * 1.04),
+    (height - 46) / size,
   ));
   return {
     width,
     height,
     size,
     tileWidth,
-    tileHeight: tileWidth * 0.52,
+    tileHeight: tileWidth * 0.5,
   };
 }
 
