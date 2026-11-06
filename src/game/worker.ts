@@ -193,20 +193,12 @@ function hire(baseId: string, kind: UnitKind): boolean {
   if (!base || base.rank < definition.unlockRank || game.tokens[game.playerFaction] < definition.cost) return false;
   const limit = 3 + game.bases.filter((item) => item.owner === game?.playerFaction).length + base.rank;
   if (game.units.filter((unit) => unit.faction === game?.playerFaction).length >= limit) return false;
-  const spawn = [
-    { x: base.x, y: base.y - 1 }, { x: base.x + 1, y: base.y },
-    { x: base.x, y: base.y + 1 }, { x: base.x - 1, y: base.y },
-  ].find((position) => {
-    const tile = tileAt(position.x, position.y);
-    return tile && tile.terrain !== "water" && !unitAt(position.x, position.y);
-  });
-  if (!spawn) return false;
-
   game.tokens[game.playerFaction] -= definition.cost;
   const count = game.units.filter((unit) => unit.faction === game?.playerFaction && unit.kind === kind).length + 1;
   game.units.push({
     id: `${game.playerFaction}-${kind}-${game.turn}-${count}`,
-    ...spawn,
+    x: base.x,
+    y: base.y,
     faction: game.playerFaction,
     kind,
     hp: definition.maxHp,
@@ -279,23 +271,13 @@ function evaluateBotTurn(): void {
   const recruit = bot === "robots" ? "workerBot" : "junior";
   const recruitCost = UNIT_DEFINITIONS[recruit].cost;
   if (botUnitCount < 2 && game.tokens[bot] >= recruitCost) {
-    const base = ownedBases.find((candidate) => {
-      const surrounding = [
-        { x: candidate.x, y: candidate.y - 1 }, { x: candidate.x + 1, y: candidate.y },
-        { x: candidate.x, y: candidate.y + 1 }, { x: candidate.x - 1, y: candidate.y },
-      ];
-      return surrounding.some((position) => !unitAt(position.x, position.y)
-        && tileAt(position.x, position.y)?.terrain !== "water");
-    });
+    const base = ownedBases[0];
     if (base) {
       game.tokens[bot] -= recruitCost;
-      const spawn = [
-        { x: base.x, y: base.y - 1 }, { x: base.x + 1, y: base.y },
-        { x: base.x, y: base.y + 1 }, { x: base.x - 1, y: base.y },
-      ].find((position) => !unitAt(position.x, position.y) && tileAt(position.x, position.y)?.terrain !== "water");
-      if (spawn) game.units.push({
+      game.units.push({
         id: `${bot}-hire-${game.turn}`,
-        ...spawn,
+        x: base.x,
+        y: base.y,
         faction: bot,
         kind: recruit,
         hp: UNIT_DEFINITIONS[recruit].maxHp,

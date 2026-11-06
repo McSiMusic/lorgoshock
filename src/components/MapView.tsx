@@ -57,18 +57,23 @@ function drawTile(
   const block = new Graphics();
   const waterWave = new Graphics();
 
-  polygon(block, [x - width, y, x, y + height, x, y + height + depth, x - width, y + depth], tile.terrain === "water" ? 0x1765b2 : 0x984e3f);
-  polygon(block, [x, y + height, x + width, y, x + width, y + depth, x, y + height + depth], tile.terrain === "water" ? 0x104887 : 0x743c41);
-  polygon(block, tileTop, fogged ? 0x25383d : tint(palette[variant % palette.length], (variant - 1) * 5), fogged ? 0.84 : tile.visible ? 1 : 0.74);
-  polygon(block, [x, y, x + width, y, x, y + height], fogged ? 0x33474a : palette[2], fogged ? 0.16 : 0.38);
-  polygon(block, [x, y, x - width, y, x, y + height], fogged ? 0x101f31 : palette[1], fogged ? 0.2 : 0.4);
-  block.poly(tileTop).stroke({ color: fogged ? 0x566d6f : tint(palette[0], 24), width: 0.65, alpha: fogged ? 0.18 : 0.55 });
+  polygon(block, [x - width, y, x, y + height, x, y + height + depth, x - width, y + depth], fogged ? 0xd7e3ed : tile.terrain === "water" ? 0x1765b2 : 0x984e3f);
+  polygon(block, [x, y + height, x + width, y, x + width, y + depth, x, y + height + depth], fogged ? 0xc3d3e2 : tile.terrain === "water" ? 0x104887 : 0x743c41);
+  polygon(block, tileTop, fogged ? 0xf4f8fc : tint(palette[variant % palette.length], (variant - 1) * 5), fogged ? 0.98 : tile.visible ? 1 : 0.74);
+  polygon(block, [x, y, x + width, y, x, y + height], fogged ? 0xffffff : palette[2], fogged ? 0.5 : 0.38);
+  polygon(block, [x, y, x - width, y, x, y + height], fogged ? 0xdce9f3 : palette[1], fogged ? 0.45 : 0.4);
+  block.poly(tileTop).stroke({ color: fogged ? 0xffffff : tint(palette[0], 24), width: 0.65, alpha: fogged ? 0.9 : 0.55 });
 
   if (tile.visible && !fogged && tile.terrain === "water") {
-    waterWave.moveTo(x - width * 0.32, y - height * 0.12)
-      .lineTo(x - width * 0.07, y - height * 0.29)
-      .lineTo(x + width * 0.13, y - height * 0.15)
-      .stroke({ color: 0xb4ffff, width: Math.max(0.7, width * 0.045), alpha: 0.8 });
+    const waveWidth = Math.max(0.7, width * 0.045);
+    for (const offset of [-0.28, 0.05, 0.29]) {
+      const waveX = x + width * offset;
+      const waveY = y + height * (offset * 0.4);
+      waterWave.moveTo(waveX - width * 0.15, waveY)
+        .lineTo(waveX - width * 0.04, waveY - height * 0.13)
+        .lineTo(waveX + width * 0.12, waveY - height * 0.04)
+        .stroke({ color: 0xd4ffff, width: waveWidth, alpha: 0.9 });
+    }
   }
 
   root.addChild(block);
@@ -97,6 +102,22 @@ function drawTile(
     root.addChild(peak);
   }
 
+  if (tile.terrain === "plain") {
+    const grass = new Graphics();
+    const grassColor = variant % 2 === 0 ? 0x278c46 : 0x348e49;
+    for (let tuft = 0; tuft < 3; tuft++) {
+      const tuftX = x + width * ((tuft - 1) * 0.31);
+      const tuftY = y + height * (tuft === 1 ? 0.2 : -0.02);
+      grass.moveTo(tuftX - width * 0.035, tuftY)
+        .lineTo(tuftX, tuftY - height * 0.19)
+        .lineTo(tuftX + width * 0.045, tuftY)
+        .stroke({ color: grassColor, width: Math.max(0.6, width * 0.04), alpha: 0.75 });
+      grass.circle(tuftX + width * 0.11, tuftY - height * 0.06, Math.max(0.35, width * 0.025))
+        .fill({ color: 0xf4da79, alpha: 0.8 });
+    }
+    root.addChild(grass);
+  }
+
   if (tile.terrain === "forest" || tile.geese && !tile.poiClaimed) {
     const trees = tile.terrain === "forest" ? 1 + ((tile.x * 3 + tile.y * 7) % 2) : 1;
     for (let treeIndex = 0; treeIndex < trees; treeIndex++) {
@@ -106,16 +127,20 @@ function drawTile(
       const treeHeight = height * (tile.geese ? 1.1 : 1.45 + treeIndex % 2 * 0.23);
       const foliage = new Graphics();
       const leaf = tile.geese && !tile.poiClaimed ? 0xeff28b : treeIndex === 0 ? 0x18a959 : 0x27cd80;
-      polygon(foliage, [
-        baseX - width * 0.24, baseY,
-        baseX, baseY - treeHeight,
-        baseX + width * 0.24, baseY,
-      ], leaf);
-      polygon(foliage, [
-        baseX, baseY - treeHeight,
-        baseX + width * 0.24, baseY,
-        baseX + width * 0.03, baseY - height * 0.02,
-      ], tint(leaf, 22));
+      for (let layer = 0; layer < 3; layer++) {
+        const layerY = baseY - treeHeight * layer * 0.27;
+        const layerWidth = width * (0.24 - layer * 0.045);
+        polygon(foliage, [
+          baseX - layerWidth, layerY,
+          baseX, layerY - treeHeight * 0.43,
+          baseX + layerWidth, layerY,
+        ], layer === 1 ? tint(leaf, 14) : leaf);
+        polygon(foliage, [
+          baseX, layerY - treeHeight * 0.43,
+          baseX + layerWidth, layerY,
+          baseX + width * 0.03, layerY - height * 0.02,
+        ], tint(leaf, 26));
+      }
       polygon(foliage, [
         baseX - width * 0.045, baseY + depth * 0.18,
         baseX + width * 0.045, baseY + depth * 0.18,
@@ -157,54 +182,121 @@ function drawUnit(root: Container, grid: ReturnType<typeof createIsometricGrid>,
   const tile = game.tiles[unit.y * game.size + unit.x];
   if (!tile || !tile.visible && unit.faction !== game.playerFaction) return;
 
-  const { x, y } = tileCenter(grid, unit.x, unit.y);
-  const size = grid.tileWidth;
+  const center = tileCenter(grid, unit.x, unit.y);
+  const stack = game.units.filter((candidate) => candidate.x === unit.x && candidate.y === unit.y);
+  const stackIndex = stack.findIndex((candidate) => candidate.id === unit.id);
+  const stackAngle = stackIndex / stack.length * Math.PI * 2;
+  const stackRadius = Math.min(Math.max(grid.tileWidth * 0.5, 6), grid.tileHeight * 1.7);
+  const x = center.x + (stack.length > 1 ? Math.cos(stackAngle) * stackRadius : 0);
+  const y = center.y + (stack.length > 1 ? Math.sin(stackAngle) * stackRadius * 0.65 : 0);
+  const size = Math.max(grid.tileWidth, 14);
+  const unitTileHeight = Math.max(grid.tileHeight, 7.5);
   const isHuman = unit.faction === "lorgoshki";
   const primary = isHuman ? 0xff58bd : 0x5bfcf1;
   const light = isHuman ? 0xffb7e5 : 0xc3fffb;
   const dark = isHuman ? 0xd629a5 : 0x157dc1;
-  const height = Math.max(8, grid.tileHeight * 1.8);
+  const height = Math.max(8, unitTileHeight * 1.8);
   const character = new Graphics();
 
-  character.ellipse(x, y + grid.tileHeight * 0.7, size * 0.33, grid.tileHeight * 0.15)
+  character.ellipse(x, y + unitTileHeight * 0.7, size * 0.33, unitTileHeight * 0.15)
     .fill({ color: 0x13263a, alpha: 0.45 });
 
-  polygon(character, [x - size * 0.22, y + grid.tileHeight * 0.35, x - size * 0.04, y + grid.tileHeight * 0.35, x - size * 0.14, y + height * 0.09], dark);
-  polygon(character, [x + size * 0.04, y + grid.tileHeight * 0.35, x + size * 0.22, y + grid.tileHeight * 0.35, x + size * 0.14, y + height * 0.09], light);
-  polygon(character, [x - size * 0.3, y - height * 0.08, x, y - height * 0.25, x + size * 0.3, y - height * 0.08, x, y + grid.tileHeight * 0.4], primary);
-  polygon(character, [x, y - height * 0.25, x + size * 0.3, y - height * 0.08, x, y + grid.tileHeight * 0.4], light);
-  polygon(character, [x - size * 0.19, y - height * 0.2, x - size * 0.4, y + height * 0.17, x - size * 0.24, y + height * 0.12, x - size * 0.07, y - height * 0.04], dark);
-  polygon(character, [x + size * 0.19, y - height * 0.2, x + size * 0.4, y + height * 0.17, x + size * 0.24, y + height * 0.12, x + size * 0.07, y - height * 0.04], primary);
-
-  polygon(character, [
-    x - size * 0.22, y - height * 0.25,
-    x, y - height * 0.63,
-    x + size * 0.22, y - height * 0.25,
-  ], light);
-  polygon(character, [
-    x - size * 0.22, y - height * 0.25,
-    x, y - height * 0.63,
-    x, y - height * 0.22,
-  ], primary);
-  polygon(character, [
-    x + size * 0.095, y - height * 0.33,
-    x + size * 0.16, y - height * 0.32,
-    x + size * 0.075, y - height * 0.29,
-  ], 0x30274b);
+  if (unit.kind === "courier") {
+    const wheelRadius = Math.max(1.5, size * 0.18);
+    const wheelY = y + unitTileHeight * 0.12;
+    const rearWheelX = x - size * 0.32;
+    const frontWheelX = x + size * 0.32;
+    character.circle(rearWheelX, wheelY, wheelRadius).fill({ color: 0x20283a })
+      .stroke({ color: 0xc9d2dc, width: Math.max(0.7, size * 0.045) });
+    character.circle(frontWheelX, wheelY, wheelRadius).fill({ color: 0x20283a })
+      .stroke({ color: 0xc9d2dc, width: Math.max(0.7, size * 0.045) });
+    character.moveTo(rearWheelX, wheelY).lineTo(x, wheelY - unitTileHeight * 0.3)
+      .lineTo(frontWheelX, wheelY).lineTo(rearWheelX, wheelY)
+      .moveTo(x, wheelY - unitTileHeight * 0.3).lineTo(x + size * 0.1, wheelY)
+      .stroke({ color: 0xe7a542, width: Math.max(0.8, size * 0.055) });
+    character.moveTo(frontWheelX, wheelY - unitTileHeight * 0.15).lineTo(frontWheelX + size * 0.12, wheelY - unitTileHeight * 0.25)
+      .stroke({ color: 0xdce7ef, width: Math.max(0.7, size * 0.045) });
+    polygon(character, [
+      x - size * 0.18, wheelY - unitTileHeight * 0.28,
+      x, wheelY - unitTileHeight * 0.68,
+      x + size * 0.15, wheelY - unitTileHeight * 0.3,
+      x + size * 0.02, wheelY - unitTileHeight * 0.14,
+    ], primary);
+    character.circle(x, wheelY - unitTileHeight * 0.77, Math.max(1.5, size * 0.13))
+      .fill({ color: light }).stroke({ color: dark, width: Math.max(0.5, size * 0.025) });
+    character.roundRect(x - size * 0.38, wheelY - unitTileHeight * 0.65, size * 0.2, unitTileHeight * 0.21, 1)
+      .fill({ color: 0xffc64a }).stroke({ color: 0xfff0a8, width: Math.max(0.5, size * 0.025) });
+    character.moveTo(x - size * 0.06, wheelY - unitTileHeight * 0.2).lineTo(rearWheelX, wheelY)
+      .moveTo(x + size * 0.03, wheelY - unitTileHeight * 0.2).lineTo(x + size * 0.2, wheelY)
+      .stroke({ color: dark, width: Math.max(0.7, size * 0.04) });
+  } else if (unit.faction === "robots") {
+    const bodyWidth = size * (unit.kind === "vacuum" ? 0.6 : 0.52);
+    const bodyTop = y - height * (unit.kind === "drone" ? 0.3 : 0.26);
+    const bodyBottom = y + unitTileHeight * 0.32;
+    const robotBase = unit.kind === "vacuum" ? 0x526576 : 0x71879a;
+    if (unit.kind === "drone") {
+      character.moveTo(x - bodyWidth * 0.9, bodyTop - unitTileHeight * 0.12).lineTo(x + bodyWidth * 0.9, bodyTop - unitTileHeight * 0.12)
+        .moveTo(x - bodyWidth * 0.72, bodyTop - unitTileHeight * 0.2).lineTo(x - bodyWidth * 0.72, bodyTop)
+        .moveTo(x + bodyWidth * 0.72, bodyTop - unitTileHeight * 0.2).lineTo(x + bodyWidth * 0.72, bodyTop)
+        .stroke({ color: light, width: Math.max(0.8, size * 0.05) });
+      character.roundRect(x - bodyWidth * 0.5, bodyTop, bodyWidth, unitTileHeight * 0.36, Math.max(1, size * 0.08))
+        .fill({ color: robotBase }).stroke({ color: light, width: Math.max(0.7, size * 0.035) });
+      character.ellipse(x, bodyTop + unitTileHeight * 0.37, bodyWidth * 0.34, Math.max(1, unitTileHeight * 0.08))
+        .fill({ color: 0x60fff0 });
+    } else {
+      const legTop = bodyBottom - unitTileHeight * 0.12;
+      character.roundRect(x - bodyWidth * 0.38, legTop, bodyWidth * 0.24, unitTileHeight * 0.38, Math.max(1, size * 0.06))
+        .fill({ color: 0x47576b });
+      character.roundRect(x + bodyWidth * 0.14, legTop, bodyWidth * 0.24, unitTileHeight * 0.38, Math.max(1, size * 0.06))
+        .fill({ color: 0x71879a });
+      character.roundRect(x - bodyWidth * 0.55, bodyTop + unitTileHeight * 0.21, bodyWidth * 1.1, bodyBottom - bodyTop - unitTileHeight * 0.18, Math.max(1, size * 0.08))
+        .fill({ color: robotBase }).stroke({ color: light, width: Math.max(0.7, size * 0.04) });
+      character.moveTo(x - bodyWidth * 0.5, bodyTop + unitTileHeight * 0.34)
+        .lineTo(x - bodyWidth * 0.78, bodyTop + unitTileHeight * 0.62)
+        .lineTo(x - bodyWidth * 0.68, bodyTop + unitTileHeight * 0.78)
+        .moveTo(x + bodyWidth * 0.5, bodyTop + unitTileHeight * 0.34)
+        .lineTo(x + bodyWidth * 0.78, bodyTop + unitTileHeight * 0.62)
+        .lineTo(x + bodyWidth * 0.68, bodyTop + unitTileHeight * 0.78)
+        .stroke({ color: light, width: Math.max(1, size * 0.075) });
+      character.roundRect(x - bodyWidth * 0.4, bodyTop - unitTileHeight * 0.38, bodyWidth * 0.8, unitTileHeight * 0.34, Math.max(1, size * 0.07))
+        .fill({ color: 0x8fa7b8 }).stroke({ color: light, width: Math.max(0.7, size * 0.04) });
+      character.roundRect(x - bodyWidth * 0.31, bodyTop - unitTileHeight * 0.29, bodyWidth * 0.62, unitTileHeight * 0.13, 1)
+        .fill({ color: 0x12283b });
+      character.circle(x - bodyWidth * 0.14, bodyTop - unitTileHeight * 0.225, Math.max(0.7, size * 0.035))
+        .fill({ color: 0x63fff0 });
+      character.circle(x + bodyWidth * 0.14, bodyTop - unitTileHeight * 0.225, Math.max(0.7, size * 0.035))
+        .fill({ color: 0x63fff0 });
+      character.moveTo(x, bodyTop - unitTileHeight * 0.38).lineTo(x, bodyTop - unitTileHeight * 0.54)
+        .stroke({ color: light, width: Math.max(0.7, size * 0.04) });
+      character.circle(x, bodyTop - unitTileHeight * 0.57, Math.max(0.7, size * 0.045)).fill({ color: 0xff5e83 });
+      character.roundRect(x + bodyWidth * 0.25, bodyTop + unitTileHeight * 0.34, bodyWidth * 0.18, unitTileHeight * 0.14, 1)
+        .fill({ color: 0xffc64a });
+    }
+  } else {
+    polygon(character, [x - size * 0.22, y + unitTileHeight * 0.35, x - size * 0.04, y + unitTileHeight * 0.35, x - size * 0.14, y + height * 0.09], dark);
+    polygon(character, [x + size * 0.04, y + unitTileHeight * 0.35, x + size * 0.22, y + unitTileHeight * 0.35, x + size * 0.14, y + height * 0.09], light);
+    polygon(character, [x - size * 0.3, y - height * 0.08, x, y - height * 0.25, x + size * 0.3, y - height * 0.08, x, y + unitTileHeight * 0.4], primary);
+    polygon(character, [x, y - height * 0.25, x + size * 0.3, y - height * 0.08, x, y + unitTileHeight * 0.4], light);
+    polygon(character, [x - size * 0.19, y - height * 0.2, x - size * 0.4, y + height * 0.17, x - size * 0.24, y + height * 0.12, x - size * 0.07, y - height * 0.04], dark);
+    polygon(character, [x + size * 0.19, y - height * 0.2, x + size * 0.4, y + height * 0.17, x + size * 0.24, y + height * 0.12, x + size * 0.07, y - height * 0.04], primary);
+    polygon(character, [x - size * 0.22, y - height * 0.25, x, y - height * 0.63, x + size * 0.22, y - height * 0.25], light);
+    polygon(character, [x - size * 0.22, y - height * 0.25, x, y - height * 0.63, x, y - height * 0.22], primary);
+    polygon(character, [x + size * 0.095, y - height * 0.33, x + size * 0.16, y - height * 0.32, x + size * 0.075, y - height * 0.29], 0x30274b);
+  }
 
   if (unit.faction !== game.playerFaction) {
-    character.circle(x, y + grid.tileHeight * 0.6, Math.max(1.3, size * 0.07))
+    character.circle(x, y + unitTileHeight * 0.6, Math.max(1.3, size * 0.07))
       .fill({ color: 0xff525c });
   }
   root.addChild(character);
 
   const healthWidth = Math.max(6, size * 0.63);
   const health = new Graphics();
-  health.roundRect(x - healthWidth / 2, y + grid.tileHeight * 0.76, healthWidth, Math.max(1.1, size * 0.055), 1)
+  health.roundRect(x - healthWidth / 2, y + unitTileHeight * 0.76, healthWidth, Math.max(1.1, size * 0.055), 1)
     .fill({ color: 0x183040 });
   health.roundRect(
     x - healthWidth / 2,
-    y + grid.tileHeight * 0.76,
+    y + unitTileHeight * 0.76,
     healthWidth * (unit.hp / UNIT_DEFINITIONS[unit.kind].maxHp),
     Math.max(1.1, size * 0.055),
     1,
@@ -263,7 +355,9 @@ function drawLatest(
     root.addChild(marker);
   }
 
-  for (const base of game.bases) drawBase(root, grid, game, base);
+  for (const base of game.bases) {
+    if (game.tiles[base.y * game.size + base.x]?.visible) drawBase(root, grid, game, base);
+  }
   for (const unit of game.units) drawUnit(root, grid, unit, game);
 }
 

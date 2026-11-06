@@ -346,6 +346,7 @@ kbd { padding: 3px 6px; border: 1px solid #464a3d; color: #c9b57a; font: inherit
 .legend-human { border-color: var(--amber) !important; background: #f3bd61; }
 .legend-enemy { border-color: var(--coral) !important; background: #e77a68; }
 .legend-neutral { border-color: #d8c99a !important; background: #b8aa78; }
+.legend-fog { border-color: #ffffff !important; background: #eef5fb; }
 .map-tip { margin-top: 1px; color: #747d70; font-size: 8px; letter-spacing: .04em; }
 
 .sidebar {
@@ -388,6 +389,7 @@ kbd { padding: 3px 6px; border: 1px solid #464a3d; color: #c9b57a; font: inherit
 .object-heading > div { display: grid; gap: 4px; }
 .object-heading strong { color: #e5dfce; font: 600 11px var(--display); }
 .object-heading small { color: #8c9283; font: 7px var(--mono); letter-spacing: .04em; }
+.garrison-note { margin: 5px 0 -3px 40px; color: #858b9f; font: 7px var(--mono); }
 .progress-copy, .recruit-heading { margin-top: 10px; display: flex; justify-content: space-between; color: #969787; font-size: 7px; }
 .progress-track { height: 3px; margin-top: 6px; background: #393a5b; }
 .progress-track > span { height: 100%; display: block; background: linear-gradient(90deg, #bd8c43, #efd27c); }

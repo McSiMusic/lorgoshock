@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Provider, useDispatch, useSelector } from "react-redux";
-import { UNIT_DEFINITIONS, type Faction, type GameCommand, type GameState, type UnitKind } from "../game/model";
+import { MAP_SIZES, UNIT_DEFINITIONS, type Faction, type GameCommand, type GameState, type UnitKind } from "../game/model";
 import { incomeForRank, progressToNextRank } from "../game/rules";
 import { makeStore, resetState, setError, syncState, type AppDispatch, type RootState } from "../state/store";
 import MapView from "./MapView";
@@ -61,11 +61,11 @@ function GameApp() {
     if (sharedSeed) {
       setSeed(sharedSeed);
       if (sharedFaction === "robots" || sharedFaction === "lorgoshki") setFaction(sharedFaction);
-      if ([16, 24, 32].includes(sharedSize)) setMapSize(sharedSize);
+      if (MAP_SIZES.some((size) => size === sharedSize)) setMapSize(sharedSize);
       worker.postMessage({
         type: "START",
         seed: sharedSeed,
-        size: [16, 24, 32].includes(sharedSize) ? sharedSize : 16,
+        size: MAP_SIZES.some((size) => size === sharedSize) ? sharedSize : 16,
         faction: sharedFaction === "robots" ? "robots" : "lorgoshki",
       } satisfies GameCommand);
     }
@@ -96,25 +96,45 @@ function GameApp() {
 
   const units = game?.units ?? [];
   const selectedUnit = units.find((unit) => unit.id === selectedId);
-  const selectedBase = game?.bases.find((base) => base.x === selectedPosition?.x && base.y === selectedPosition?.y);
-  const selectedTile = game?.tiles.find((tile) => tile.x === selectedPosition?.x && tile.y === selectedPosition?.y);
+  const selectedPositionVisible = Boolean(selectedPosition
+    && game?.tiles[selectedPosition.y * game.size + selectedPosition.x]?.visible);
+  const selectedBase = selectedPositionVisible
+    ? game?.bases.find((base) => base.x === selectedPosition?.x && base.y === selectedPosition?.y)
+    : undefined;
+  const selectedTile = selectedPositionVisible
+    ? game?.tiles.find((tile) => tile.x === selectedPosition?.x && tile.y === selectedPosition?.y)
+    : undefined;
   const selectedOwnedBase = selectedBase?.owner === game?.playerFaction ? selectedBase : undefined;
-  const selectedEnemy = units.find((unit) => unit.x === selectedPosition?.x && unit.y === selectedPosition?.y && unit.faction !== game?.playerFaction);
+  const selectedEnemy = selectedPositionVisible
+    ? units.find((unit) => unit.x === selectedPosition?.x && unit.y === selectedPosition?.y && unit.faction !== game?.playerFaction)
+    : undefined;
   const nearbyFriendlyUnit = units.find((unit) => unit.x === selectedPosition?.x && unit.y === selectedPosition?.y && unit.faction === game?.playerFaction);
   const selectedUnitDefinition = selectedUnit ? UNIT_DEFINITIONS[selectedUnit.kind] : null;
   const availableRecruit = selectedOwnedBase
     ? UNIT_BY_TIER[game?.playerFaction ?? faction].filter((kind) => UNIT_DEFINITIONS[kind].unlockRank <= selectedOwnedBase.rank)
     : [];
-  const enemyBases = game?.bases.filter((base) => base.owner === game?.botFaction).length ?? 0;
-  const neutralBases = game?.bases.filter((base) => base.owner === null).length ?? 0;
+  const isKnownBase = (base: NonNullable<typeof game>["bases"][number]) =>
+    base.owner === game?.playerFaction || game?.tiles[base.y * game.size + base.x]?.explored;
+  const knownBases = game?.bases.filter(isKnownBase) ?? [];
+  const enemyBases = knownBases.filter((base) => base.owner === game?.botFaction).length;
+  const neutralBases = knownBases.filter((base) => base.owner === null).length;
+  const knownBaseCount = knownBases.length;
 
   const selectTile = (x: number, y: number) => {
-    const unit = units.find((candidate) => candidate.x === x && candidate.y === y);
+    const tileVisible = Boolean(game?.tiles[y * game.size + x]?.visible);
+    const unitsOnTile = units.filter((candidate) => candidate.x === x && candidate.y === y
+      && (tileVisible || candidate.faction === game?.playerFaction));
     setSelectedPosition({ x, y });
-    if (unit && unit.faction === game?.playerFaction) {
-      setSelectedId(unit.id);
+    const friendlyUnits = unitsOnTile.filter((candidate) => candidate.faction === game?.playerFaction);
+    if (friendlyUnits.length) {
+      const currentIndex = friendlyUnits.findIndex((candidate) => candidate.id === selectedId);
+      const nextUnit = selectedPosition?.x === x && selectedPosition.y === y && currentIndex >= 0
+        ? friendlyUnits[(currentIndex + 1) % friendlyUnits.length]
+        : friendlyUnits[0];
+      setSelectedId(nextUnit.id);
       return;
     }
+    const unit = unitsOnTile[0];
     if (!selectedId) setSelectedId(units.find((candidate) => candidate.faction === game?.playerFaction)?.id ?? null);
     if (!game || !selectedId) return;
 
@@ -169,7 +189,7 @@ function GameApp() {
                 <span className="faction-emoji">🤖</span><span className="faction-label"><strong>Роботы</strong><small>ЛИТИЙ · СЕРВЕРЫ · АЛГОРИТМЫ</small></span><span className="radio-dot" />
               </button>
             </div>
-            <div className="setup-row"><label htmlFor="map-size">РАЗМЕР КАРТЫ</label><select id="map-size" value={mapSize} onChange={(event) => setMapSize(Number(event.target.value))}><option value={16}>16 × 16 · Экспресс</option><option value={24}>24 × 24 · Карьера</option><option value={32}>32 × 32 · Выгорание</option></select></div>
+            <div className="setup-row"><label htmlFor="map-size">РАЗМЕР КАРТЫ</label><select id="map-size" value={mapSize} onChange={(event) => setMapSize(Number(event.target.value))}>{MAP_SIZES.map((size) => <option value={size} key={size}>{size} × {size} · {size === 16 ? "Экспресс" : size === 24 ? "Карьера" : "Выгорание"}</option>)}</select></div>
             <div className="setup-row"><label htmlFor="seed">СИД МАТЧА</label><div className="seed-control"><input id="seed" value={seed} onChange={(event) => setSeed(event.target.value)} maxLength={24} /><button type="button" aria-label="Сгенерировать сид" onClick={() => setSeed(createSeed())}>⟳</button></div></div>
             <button type="button" className="launch-button" onClick={startGame}><span>НАЧАТЬ ПАРТИЮ</span><span>↗</span></button>
             <p className="setup-note">Мир и соперник создаются локально. <strong>Сервера не следят.</strong></p>
@@ -195,7 +215,7 @@ function GameApp() {
         <div className="map-column">
           <div className="map-caption"><span><i /> ПОЛЕ {game.size} × {game.size}</span><span>СИД · {game.seed}</span></div>
           <MapView game={game} selected={selectedPosition} onTileClick={selectTile} />
-          <div className="map-legend"><span><i className="legend-human" />ТВОЯ КОМАНДА</span><span><i className="legend-enemy" />ИИ-КОРПОРАЦИЯ</span><span><i className="legend-neutral" />БЕСХОЗНАЯ БАЗА</span><span>◌ ТУМАН ВОЙНЫ</span></div>
+          <div className="map-legend"><span><i className="legend-human" />ТВОЯ КОМАНДА</span><span><i className="legend-enemy" />ИИ-КОРПОРАЦИЯ</span><span><i className="legend-neutral" />БЕСХОЗНАЯ БАЗА</span><span><i className="legend-fog" />ТУМАН ВОЙНЫ</span></div>
           <div className="map-tip">ВЫБЕРИ ГЕРОЯ И НАЖМИ НА ГОЛУБУЮ КЛЕТКУ ДЛЯ ХОДА · Закрепи за собой все базы</div>
         </div>
         <aside className="sidebar">
@@ -203,7 +223,7 @@ function GameApp() {
           <div className="section-title"><span>ЭКОНОМИКА</span><span>ХОД / ТИК</span></div>
           <div className="economy-grid">
             <div className="economy-card"><span>◈</span><small>БЮДЖЕТ</small><strong>{game.tokens[game.playerFaction]}<i> T</i></strong></div>
-            <div className="economy-card"><span>▤</span><small>{game.playerFaction === "lorgoshki" ? "КОМПАНИЙ" : "ФЕРМ"}</small><strong>{game.bases.filter((base) => base.owner === game.playerFaction).length}<i> / {game.bases.length}</i></strong></div>
+            <div className="economy-card"><span>▤</span><small>{game.playerFaction === "lorgoshki" ? "КОМПАНИЙ" : "ФЕРМ"}</small><strong>{game.bases.filter((base) => base.owner === game.playerFaction).length}<i> / {knownBaseCount} ИЗВЕСТНЫХ</i></strong></div>
             <div className="economy-card"><span>⌁</span><small>ДОХОД</small><strong>+{game.bases.filter((base) => base.owner === game.playerFaction).reduce((sum, base) => sum + incomeForRank(base.rank), 0)}<i> / ход</i></strong></div>
             <div className="economy-card"><span>⚔</span><small>АРМИЯ</small><strong>{units.filter((unit) => unit.faction === game.playerFaction).length}<i> юн.</i></strong></div>
           </div>
@@ -212,9 +232,10 @@ function GameApp() {
             {selectedOwnedBase ? (
               <>
                 <div className="object-heading"><span className="object-icon">{game.playerFaction === "lorgoshki" ? "🏢" : "🏭"}</span><div><strong>{game.playerFaction === "lorgoshki" ? "Компания" : "Майнинг-ферма"}</strong><small>УРОВЕНЬ {selectedOwnedBase.rank} · +{incomeForRank(selectedOwnedBase.rank)} T / ХОД</small></div></div>
+                <div className="garrison-note">{units.filter((unit) => unit.x === selectedOwnedBase.x && unit.y === selectedOwnedBase.y && unit.faction === game.playerFaction).length} юн. в гарнизоне · повторный клик выбирает бойца</div>
                 <div className="progress-copy"><span>ПРОГРЕСС РАЗВИТИЯ</span><span>{selectedOwnedBase.rank >= 4 ? "MAX" : `${selectedOwnedBase.progress} / ${progressToNextRank(selectedOwnedBase.rank)}`}</span></div>
                 <div className="progress-track"><span style={{ width: `${selectedOwnedBase.rank >= 4 ? 100 : Math.min(100, selectedOwnedBase.progress / progressToNextRank(selectedOwnedBase.rank) * 100)}%` }} /></div>
-                <div className="recruit-heading"><span>НАНЯТЬ ЮНИТА</span><span>НАЙМ · TOKEN</span></div>
+                <div className="recruit-heading"><span>ТРЕНИРОВКА В ГОРОДЕ</span><span>НАЙМ · TOKEN</span></div>
                 <div className="recruit-list">{availableRecruit.map((kind) => {
                   const unit = UNIT_DEFINITIONS[kind];
                   const canAfford = game.tokens[game.playerFaction] >= unit.cost;

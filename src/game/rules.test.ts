@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createIsometricGrid, screenToTile, tileCenter } from "./isometric";
+import { MAP_SIZES } from "./model";
 import { createGame, damage, incomeForRank, progressToNextRank, revealAround, shortestPath } from "./rules";
 
 describe("game rules", () => {
@@ -12,6 +13,34 @@ describe("game rules", () => {
     expect(first.units).toHaveLength(2);
     expect(first.units[0].x).toBe(2);
     expect(first.units[1].x).toBe(13);
+  });
+
+  it("limits map generation to supported sizes no larger than 32", () => {
+    expect(MAP_SIZES).toEqual([16, 24, 32]);
+    expect(() => createGame("oversized", 64, "lorgoshki")).toThrow(/16, 24, 32/);
+    expect(createGame("largest", 32, "lorgoshki").size).toBe(32);
+  });
+
+  it("keeps neutral and enemy bases hidden until their tiles are explored", () => {
+    const game = createGame("hidden-startups", 16, "lorgoshki");
+    const playerBase = game.bases.find((base) => base.owner === game.playerFaction);
+    const hiddenBases = game.bases.filter((base) => base.owner !== game.playerFaction);
+
+    expect(playerBase).toBeDefined();
+    expect(game.tiles[playerBase!.y * game.size + playerBase!.x].visible).toBe(true);
+    expect(hiddenBases.length).toBeGreaterThan(0);
+    expect(hiddenBases.every((base) => !game.tiles[base.y * game.size + base.x].explored)).toBe(true);
+  });
+
+  it("keeps an owned city visible after its garrison leaves", () => {
+    const game = createGame("city-vision", 16, "lorgoshki");
+    const playerBase = game.bases.find((base) => base.owner === game.playerFaction)!;
+    game.units[0].x = 0;
+    game.units[0].y = 0;
+
+    revealAround(game);
+
+    expect(game.tiles[playerBase.y * game.size + playerBase.x].visible).toBe(true);
   });
 
   it("assigns the chosen faction the matching opponent", () => {

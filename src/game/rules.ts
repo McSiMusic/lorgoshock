@@ -1,5 +1,6 @@
 import {
   FACTION_NAMES,
+  MAP_SIZES,
   UNIT_DEFINITIONS,
   type Base,
   type Faction,
@@ -40,16 +41,15 @@ export function progressToNextRank(rank: number): number {
   return rank >= 4 ? 4 : rank + 1;
 }
 
-export function revealAround(state: Pick<GameState, "tiles" | "size" | "units" | "playerFaction" | "tech">): void {
+export function revealAround(state: Pick<GameState, "tiles" | "size" | "units" | "bases" | "playerFaction" | "tech">): void {
   for (const tile of state.tiles) tile.visible = false;
-  for (const unit of state.units) {
-    if (unit.faction !== state.playerFaction) continue;
+  const revealFrom = (origin: { x: number; y: number }) => {
     const vision = state.tech ? 2 + state.tech[state.playerFaction][1] : 2;
     for (let dy = -vision; dy <= vision; dy++) {
       for (let dx = -vision; dx <= vision; dx++) {
         if (Math.abs(dx) + Math.abs(dy) > vision) continue;
-        const x = unit.x + dx;
-        const y = unit.y + dy;
+        const x = origin.x + dx;
+        const y = origin.y + dy;
         if (x < 0 || y < 0 || x >= state.size || y >= state.size) continue;
         const tile = state.tiles[y * state.size + x];
         if (tile) {
@@ -58,6 +58,12 @@ export function revealAround(state: Pick<GameState, "tiles" | "size" | "units" |
         }
       }
     }
+  };
+  for (const unit of state.units) {
+    if (unit.faction === state.playerFaction) revealFrom(unit);
+  }
+  for (const base of state.bases) {
+    if (base.owner === state.playerFaction) revealFrom(base);
   }
 }
 
@@ -115,6 +121,9 @@ function emptyTile(x: number, y: number, terrain: Terrain = "plain"): Tile {
 }
 
 export function createGame(seed: string, size: number, playerFaction: Faction): GameState {
+  if (!MAP_SIZES.some((supportedSize) => supportedSize === size)) {
+    throw new Error(`Размер карты должен быть одним из: ${MAP_SIZES.join(", ")}.`);
+  }
   const random = seededRandom(seed);
   const tiles = Array.from({ length: size * size }, (_, index) => {
     const x = index % size;
