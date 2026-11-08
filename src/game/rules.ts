@@ -23,14 +23,41 @@ export function seededRandom(seed: string): () => number {
   };
 }
 
+export function effectiveAttack(state: GameState, attacker: Unit): number {
+  return (UNIT_DEFINITIONS[attacker.kind].attack + (attacker.faction === "lorgoshki" && state.tech.lorgoshki[1] >= 1 ? 1 : 0))
+    * attacker.hp / UNIT_DEFINITIONS[attacker.kind].maxHp;
+}
+
+export function attackRange(state: GameState, unit: Unit): number {
+  return UNIT_DEFINITIONS[unit.kind].range + (state.tech[unit.faction][1] >= 2 ? 1 : 0);
+}
+
+export function hireCost(state: GameState, faction: Faction, kind: UnitKind): number {
+  return Math.max(1, UNIT_DEFINITIONS[kind].cost - (faction === "lorgoshki" && state.tech.lorgoshki[0] >= 2 ? 1 : 0));
+}
+
+export function availableTechnologyLevels(faction: Faction, branch: number): number {
+  return (faction === "lorgoshki" ? [3, 2, 0] : [1, 0, 0])[branch] ?? 0;
+}
+
 export function damage(attacker: Unit, defender: Unit, state: GameState): number {
-  const attack = UNIT_DEFINITIONS[attacker.kind].attack
-    + state.tech[attacker.faction][1] * 0.4;
-  const defense = UNIT_DEFINITIONS[defender.kind].defense
-    + state.tech[defender.faction][0] * 0.5;
-  const attackForce = attack * (attacker.hp / UNIT_DEFINITIONS[attacker.kind].maxHp);
+  const defense = Math.max(0, UNIT_DEFINITIONS[defender.kind].defense
+    - (defender.faction === "robots" && state.tech.robots[0] >= 1 ? 1 : 0));
   const defenseForce = defense * (defender.hp / UNIT_DEFINITIONS[defender.kind].maxHp);
-  return Math.max(1, Math.min(defender.hp, Math.round(attackForce + defenseForce)));
+  const attackForce = effectiveAttack(state, attacker) + defenseForce * attacker.hp / UNIT_DEFINITIONS[attacker.kind].maxHp;
+  const cover = hasCover(state, defender) ? 0.75 : 1;
+  return Math.max(1, Math.min(defender.hp, Math.round(attackForce * cover)));
+}
+
+export function hasTerrainCover(state: Pick<GameState, "size" | "tiles">, unit: Unit): boolean {
+  const tile = state.tiles[unit.y * state.size + unit.x];
+  return Boolean(tile && (tile.terrain === "mountain"
+    || (tile.terrain === "forest" && (!tile.poiClaimed || tile.poi))));
+}
+
+export function hasCover(state: Pick<GameState, "size" | "tiles" | "bases">, unit: Unit): boolean {
+  const base = state.bases.find((entry) => entry.x === unit.x && entry.y === unit.y);
+  return base ? base.owner === unit.faction && !base.capture : hasTerrainCover(state, unit);
 }
 
 export function incomeForRank(rank: number): number {
@@ -46,7 +73,7 @@ export function gridDistance(first: { x: number; y: number }, second: { x: numbe
 }
 
 export function movementRange(state: Pick<GameState, "turn">, unit: Unit): number {
-  return UNIT_DEFINITIONS[unit.kind].move * (unit.coffeeBoostTurn === state.turn ? 2 : 1);
+  return UNIT_DEFINITIONS[unit.kind].move * (unit.coffeeMovementBoost || unit.coffeeBoostTurn === state.turn ? 2 : 1);
 }
 
 export function cityCapacity(base: Base): number {
@@ -63,19 +90,51 @@ export function canAttack(state: GameState, attacker: Unit, defender: Unit): boo
     && attacker.faction !== defender.faction && !attacker.attacked
     && UNIT_DEFINITIONS[attacker.kind].attack > 0
     && (attacker.faction !== state.playerFaction || Boolean(tile?.explored))
-    && gridDistance(attacker, defender) <= UNIT_DEFINITIONS[attacker.kind].range + state.tech[attacker.faction][1];
+    && gridDistance(attacker, defender) <= attackRange(state, attacker);
 }
 
 export function canHarvestWithinCity(base: Base, tile: { x: number; y: number }): boolean {
   return gridDistance(base, tile) <= Math.floor(base.resourceRange / 2);
 }
 
+export function healingAmount(state: Pick<GameState, "bases">, unit: Unit): number {
+  const maxHp = UNIT_DEFINITIONS[unit.kind].maxHp;
+  const ownCity = state.bases.some((base) => base.owner === unit.faction && base.x === unit.x && base.y === unit.y);
+  const enemyTerritory = state.bases.some((base) => base.owner !== null && base.owner !== unit.faction && canHarvestWithinCity(base, unit));
+  const divisor = ownCity ? 2 : enemyTerritory ? 4 : 3;
+  return Math.max(0, Math.min(maxHp - unit.hp, Math.ceil(maxHp / divisor)));
+}
+
 export function resourceCost(tile: Tile): number | null {
-  if (tile.poiClaimed || tile.poi) return null;
+  if (tile.poiClaimed || tile.poi || tile.bridge) return null;
   if (tile.terrain === "forest") return 2;
-  if (tile.geese) return 3;
-  if (tile.terrain === "mountain" || tile.terrain === "water") return 5;
+  if (tile.geese) return 2;
+  if (tile.terrain === "mountain") return 5;
+  if (tile.terrain === "water") return 7;
   return null;
+}
+
+export function resourceProgress(tile: Tile): number {
+  return tile.terrain === "forest" || tile.geese ? 1 : tile.terrain === "mountain" ? 2 : tile.terrain === "water" ? 3 : 0;
+}
+
+export function canBuildBridge(state: GameState, base: Base, tile: Tile, axis: "x" | "y", faction: Faction = state.playerFaction): boolean {
+  if ((axis !== "x" && axis !== "y") || state.status !== "running" || base.owner !== faction || base.capture || tile.terrain !== "water"
+    || tile.poi || tile.bridge || (faction === state.playerFaction && !tile.explored)
+    || !canHarvestWithinCity(base, tile) || state.tokens[faction] < 5
+    || state.bases.some((city) => city.x === tile.x && city.y === tile.y)
+    || state.units.some((unit) => unit.x === tile.x && unit.y === tile.y)) return false;
+  const dx = axis === "x" ? 1 : 0;
+  const dy = axis === "y" ? 1 : 0;
+  return [-1, 1].every((direction) => {
+    const x = tile.x + dx * direction, y = tile.y + dy * direction;
+    return x >= 0 && y >= 0 && x < state.size && y < state.size
+      && state.tiles[y * state.size + x]?.terrain !== "water";
+  });
+}
+
+export function bridgeAxis(state: GameState, base: Base, tile: Tile, faction: Faction = state.playerFaction): "x" | "y" | undefined {
+  return (["x", "y"] as const).find((axis) => canBuildBridge(state, base, tile, axis, faction));
 }
 
 export function resourceCity(state: GameState, tile: Tile, preferredBaseId?: string | null): Base | undefined {
@@ -126,7 +185,7 @@ export function revealAround(state: Pick<GameState, "tiles" | "size" | "units" |
     }
   }
   for (const base of state.bases) {
-    if (base.owner === state.playerFaction) revealFrom(base, 2 + (state.tech?.[state.playerFaction][1] ?? 0));
+    if (base.owner === state.playerFaction) revealFrom(base, 2);
   }
 }
 
@@ -162,12 +221,10 @@ export function shortestPath(
       const x = current.x + dx;
       const y = current.y + dy;
       const tile = inBounds(x, y, state.size) ? state.tiles[y * state.size + x] : undefined;
-      if (!inBounds(x, y, state.size) || !tile || tile.terrain === "water") continue;
-      if (dx !== 0 && dy !== 0) {
-        const horizontal = state.tiles[current.y * state.size + x];
-        const vertical = state.tiles[y * state.size + current.x];
-        if (!horizontal || !vertical || horizontal.terrain === "water" || vertical.terrain === "water") continue;
-      }
+      if (!inBounds(x, y, state.size) || !tile || (tile.terrain === "water" && !tile.bridge)) continue;
+      const currentTile = state.tiles[current.y * state.size + current.x];
+      const permits = (bridge: Tile["bridge"]) => !bridge || (bridge.axis === "x" ? dy === 0 && Math.abs(dx) === 1 : dx === 0 && Math.abs(dy) === 1);
+      if (!permits(currentTile?.bridge) || !permits(tile.bridge)) continue;
       const next = key(x, y);
       if (previous.has(next)) continue;
       previous.set(next, key(current.x, current.y));
@@ -187,6 +244,27 @@ export function shortestPath(
   return path;
 }
 
+export function canMoveTo(state: GameState, unit: Unit, target: { x: number; y: number }): boolean {
+  const tile = inBounds(target.x, target.y, state.size) ? state.tiles[target.y * state.size + target.x] : undefined;
+  return state.status === "running" && !unit.moved && !unit.attacked
+    && (unit.x !== target.x || unit.y !== target.y)
+    && gridDistance(unit, target) <= movementRange(state, unit)
+    && Boolean(tile && (unit.faction !== state.playerFaction || tile.explored))
+    && !state.units.some((other) => other.x === target.x && other.y === target.y)
+    && Boolean(shortestPath(state, unit, target, movementRange(state, unit)));
+}
+
+export function hasUnitAction(state: GameState, unit: Unit): boolean {
+  if (state.status !== "running" || unit.faction !== state.playerFaction) return false;
+  if (state.units.some((target) => canAttack(state, unit, target))) return true;
+  if (unit.moved || unit.attacked) return false;
+  if (healingAmount(state, unit) > 0) return true;
+  if (state.bases.some((base) => base.capture?.unitId === unit.id && base.capture.readyTurn <= state.turn)) return true;
+  if (state.coffeeBreaks.some((visit) => visit.unitId === unit.id && visit.readyTurn <= state.turn && visit.x === unit.x && visit.y === unit.y)
+    || state.coinVisits.some((visit) => visit.unitId === unit.id && visit.readyTurn <= state.turn && visit.x === unit.x && visit.y === unit.y)) return true;
+  return state.tiles.some((tile) => canMoveTo(state, unit, tile));
+}
+
 function emptyTile(x: number, y: number, terrain: Terrain = "plain"): Tile {
   return { x, y, terrain, geese: false, poi: null, poiClaimed: false, explored: false, visible: false };
 }
@@ -200,12 +278,13 @@ export function createGame(seed: string, size: number, playerFaction: Faction): 
     const x = index % size;
     const y = Math.floor(index / size);
     const roll = random();
-    const terrain: Terrain = roll < 0.11 ? "water" : roll < 0.29 ? "forest" : roll < 0.40 ? "mountain" : "plain";
+    const terrain: Terrain = roll < 0.18 ? "water" : roll < 0.36 ? "forest" : roll < 0.47 ? "mountain" : "plain";
     return { ...emptyTile(x, y, terrain), geese: terrain === "plain" && random() < 0.22 };
   });
   const botFaction: Faction = playerFaction === "lorgoshki" ? "robots" : "lorgoshki";
-  const playerStart = { x: 2, y: 2 };
-  const botStart = { x: size - 3, y: size - 3 };
+  const corner = Math.floor(seededRandom(`start:${seed}`)() * 4);
+  const playerStart = { x: corner & 1 ? size - 3 : 2, y: corner & 2 ? size - 3 : 2 };
+  const botStart = { x: size - 1 - playerStart.x, y: size - 1 - playerStart.y };
   const starts = [playerStart, botStart];
 
   for (const start of starts) {
@@ -276,7 +355,23 @@ export function createGame(seed: string, size: number, playerFaction: Faction): 
     Object.assign(tile, emptyTile(tile.x, tile.y));
     tile.poi = "treasury";
   }
+  const reachableLand = () => {
+    const queue = [playerStart];
+    const visited = new Set([playerStart.y * size + playerStart.x]);
+    for (let cursor = 0; cursor < queue.length; cursor++) {
+      const current = queue[cursor];
+      for (const [dx, dy] of [[0, 1], [1, 0], [0, -1], [-1, 0]]) {
+        const x = current.x + dx, y = current.y + dy, key = y * size + x;
+        if (!inBounds(x, y, size) || visited.has(key) || tiles[y * size + x].terrain === "water") continue;
+        visited.add(key);
+        queue.push({ x, y });
+      }
+    }
+    return visited;
+  };
+  let reachable = reachableLand();
   for (const destination of [...bases, ...coffeeLocations, ...treasuries]) {
+    if (reachable.has(destination.y * size + destination.x)) continue;
     let { x, y } = playerStart;
     while (x !== destination.x || y !== destination.y) {
       if (x !== destination.x && (y === destination.y || random() < 0.5)) x += Math.sign(destination.x - x);
@@ -284,6 +379,7 @@ export function createGame(seed: string, size: number, playerFaction: Faction): 
       const tile = tiles[y * size + x];
       if (tile.terrain === "water") tile.terrain = "plain";
     }
+    reachable = reachableLand();
   }
 
   const startFactionUnit = (faction: Faction, kind: Unit["kind"], position: { x: number; y: number }): Unit => ({
@@ -332,12 +428,17 @@ export function baseName(faction: Faction): string {
 }
 
 export function logEvent(state: GameState, ru: string, en: string): void {
-  state.logs = [{ id: state.nextEventId++, ru, en }, ...state.logs].slice(0, 80);
+  state.logs = [{ id: state.nextEventId++, ru, en }, ...state.logs];
 }
 
 export function transferBase(state: GameState, base: Base, faction: Faction, unit: Unit): void {
   const oldOwner = base.owner;
   base.owner = faction;
+  if (oldOwner === null && faction === "lorgoshki") {
+    const networking = state.tech.lorgoshki[0];
+    if (networking >= 1) base.rank = networking >= 3 ? 3 : 2;
+    if (networking >= 3) state.tokens.lorgoshki += 5;
+  }
   base.name = makeCityName(state.seed, `${base.id}:${state.turn}`, faction, state.bases.filter((other) => other.id !== base.id).map((other) => other.name));
   base.progress = 0;
   if (faction === state.playerFaction || state.tiles[base.y * state.size + base.x]?.visible) {

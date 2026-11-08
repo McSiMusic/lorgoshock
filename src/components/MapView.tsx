@@ -4,8 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { Application, Assets, Container, Graphics, Sprite, Text, Texture } from "pixi.js";
 import { OutlineFilter } from "pixi-filters";
 import { createIsometricGrid, screenToTile, tileCenter } from "../game/isometric";
-import { UNIT_DEFINITIONS, type Base, type CombatEvent, type GameState, type IncomeEvent, type ResourceEvent, type Terrain, type Unit } from "../game/model";
-import { canAttack, canHarvestWithinCity, damage, gridDistance, movementRange, resourceCity, shortestPath } from "../game/rules";
+import { buildingKind, buildingLayout } from "../game/buildings";
+import { BOT_FOCUS_DURATION, COMBAT_DURATION, INCOME_DURATION, RESOURCE_ARRIVAL, RESOURCE_DURATION, TRANSFORMATION_DURATION, advancePosition, incomeCoinAmount, incomeCoinCount, incomeCoinProgress, resourceStarProgress, transformationFrame } from "../game/animation";
+import { UNIT_DEFINITIONS, type Base, type CombatEvent, type GameState, type IncomeEvent, type MovementEvent, type ResourceEvent, type Terrain, type Unit } from "../game/model";
+import { canAttack, canHarvestWithinCity, canMoveTo, cityCapacity, cityOccupancy, damage, gridDistance, hasCover, hasUnitAction, progressToNextRank, resourceCity } from "../game/rules";
 
 type Props = {
   game: GameState;
@@ -17,7 +19,14 @@ type Props = {
   combatEvents: CombatEvent[];
   resourceEvents: ResourceEvent[];
   incomeEvents: IncomeEvent[];
+  movementEvents: MovementEvent[];
+  focusTarget: { id: number; x: number; y: number } | null;
+  onFocusArrived: (id: number) => void;
+  onIncomeArrived: (id: number, amount: number, complete: boolean) => void;
+  onResourceArrived: (id: number) => void;
+  onAnimationsFinished: () => void;
   onTileClick: (x: number, y: number) => void;
+  onSelectCoffee: (unitId: string) => void;
   onCapture: (baseId: string, unitId: string) => void;
   onCollectCoins: (unitId: string) => void;
 };
@@ -43,6 +52,7 @@ const ART_FILES = {
     mountainB: "world/mountain-b.png",
     waterA: "world/water-a.png",
     waterB: "world/water-b.png",
+    workationFloats: "world/workation-floats.png",
     forestObjectA: "world/forest-complete.png",
     mountainObjectA: "world/mountain-complete.png",
     mountainObjectB: "world/mountain-complete.png",
@@ -53,7 +63,7 @@ const ART_FILES = {
     hike: "world/mountain-hike.png",
     geese: "world/poi-geese.png",
     icedLatte: "world/iced-latte.png",
-    fireworks: "world/fireworks-upgrade.png",
+    smoke: "world/upgrade-smoke.png",
     electricSpark: "world/electric-spark.png",
     hrNegotiation: "world/hr-negotiation.png",
     robotLayoff: "world/robot-layoff.png",
@@ -74,7 +84,7 @@ let whiteOutline: OutlineFilter | undefined;
 function outline(): OutlineFilter {
   if (!whiteOutline) {
     whiteOutline = new OutlineFilter({ thickness: 2, color: 0xffffff, alpha: 0.9, quality: 0.2 });
-    whiteOutline.resolution = "inherit";
+    whiteOutline.resolution = Math.max(2, (window.devicePixelRatio || 1) * 2);
   }
   return whiteOutline;
 }
@@ -134,6 +144,53 @@ function drawTile(
   root.addChild(terrainSprite);
 }
 
+function drawBridge(root: Container, x: number, y: number, width: number, height: number, axis: "x" | "y", robot: boolean): void {
+  const graphics = new Graphics();
+  const direction = axis === "x" ? 1 : -1;
+  const point = (along: number, across: number, lift = 0) => ({
+    x: x + along * width * 0.94 + across * width * 0.22,
+    y: y + direction * along * height * 0.94 - direction * across * height * 0.22 - lift * height,
+  });
+  const line = (a: ReturnType<typeof point>, b: ReturnType<typeof point>, color: number, thickness: number, alpha = 1) =>
+    graphics.moveTo(a.x, a.y).lineTo(b.x, b.y).stroke({ color, width: Math.max(0.7, width * thickness), alpha });
+  const quad = (points: Array<ReturnType<typeof point>>, color: number, alpha = 1) =>
+    graphics.poly(points.flatMap((p) => [p.x, p.y])).fill({ color, alpha });
+
+  quad([point(-1, -1, -0.15), point(1, -1, -0.15), point(1, 1, -0.15), point(-1, 1, -0.15)], 0x143c54, 0.4);
+  quad([point(-1, 1), point(1, 1), point(1, 1, -0.18), point(-1, 1, -0.18)], robot ? 0x29445c : 0x6a3d27);
+  quad([point(-1, -1), point(1, -1), point(1, 1), point(-1, 1)], robot ? 0x3e6475 : 0xb87d46);
+  line(point(-1, -1), point(1, -1), robot ? 0xa2e8ee : 0xf2ce8a, 0.06);
+  line(point(-1, 1), point(1, 1), robot ? 0x173b58 : 0x633922, 0.07);
+
+  for (let i = 0; i <= 9; i++) {
+    const along = -1 + i * 2 / 9;
+    line(point(along, -0.95), point(along, 0.95), robot ? 0x203f53 : 0x71442b, 0.028);
+    if (i < 9) line(point(along + 0.035, -0.85), point(along + 0.035, 0.85), robot ? 0x8dd5d9 : 0xe7b77a, 0.018, 0.8);
+  }
+  if (robot) {
+    for (const across of [-0.55, 0, 0.55]) {
+      line(point(-0.88, across, 0.02), point(0.88, across, 0.02), 0x54f6ff, across === 0 ? 0.045 : 0.025, 0.95);
+    }
+  } else {
+    for (const along of [-0.78, -0.35, 0.1, 0.55, 0.9]) {
+      for (const across of [-0.72, 0.72]) {
+        const nail = point(along, across, 0.02);
+        graphics.circle(nail.x, nail.y, Math.max(0.6, width * 0.027)).fill(0x5c3a2a);
+      }
+    }
+  }
+  for (const across of [-1, 1]) {
+    for (const along of [-0.9, -0.3, 0.3, 0.9]) {
+      line(point(along, across), point(along, across, 0.42), robot ? 0x315568 : 0x70462c, 0.075);
+      const cap = point(along, across, 0.43);
+      graphics.circle(cap.x, cap.y, Math.max(0.8, width * 0.055)).fill(robot ? 0x8afaff : 0xf2c989);
+    }
+    line(point(-0.95, across, 0.42), point(0.95, across, 0.42), robot ? 0x68eafa : 0xd5a36d, 0.045);
+    line(point(-0.95, across, 0.22), point(0.95, across, 0.22), robot ? 0x3eb7d5 : 0x9e6d43, 0.025);
+  }
+  root.addChild(graphics);
+}
+
 function drawTileDetails(
   root: Container,
   grid: ReturnType<typeof createIsometricGrid>,
@@ -166,10 +223,23 @@ function drawTileDetails(
     geese.anchor.y = 185 / 256;
     if (highlighted) geese.filters = [outline()];
   }
+  if (tile.terrain === "water" && tile.poiClaimed && !tile.bridge && (tile.harvestedBy ?? game.playerFaction) === "lorgoshki") {
+    addWorldSprite(root, art.workationFloats, x, y + height * 0.6, width * 1.8, height * 1.7);
+  }
+  if (tile.bridge) {
+    drawBridge(root, x, y, width, height, tile.bridge.axis, tile.bridge.faction === "robots");
+  }
   if (tile.poi && !tile.poiClaimed) {
-    const poiTexture = tile.poi === "coffee" ? art.coffee : art.treasury;
-    const coin = tile.poi === "treasury";
-    addWorldSprite(root, poiTexture, x, y + height * 0.42, width * (coin ? 0.8 : 1.8), height * (coin ? 1.2 : 2.8));
+    if (tile.poi === "coffee") {
+      const layout = buildingLayout("coffee", art.coffee, width, height);
+      const sprite = new Sprite(art.coffee);
+      sprite.anchor.set(layout.anchorX, layout.anchorY);
+      sprite.position.set(x, y);
+      sprite.scale.set(layout.scale);
+      root.addChild(sprite);
+    } else {
+      addWorldSprite(root, art.treasury, x, y + height * 0.42, width * 0.8, height * 1.2);
+    }
   }
   if (highlighted && tile.terrain === "water") {
     const waterOutline = new Graphics();
@@ -209,18 +279,6 @@ function fitSprite(sprite: Sprite, maxWidth: number, maxHeight: number): void {
   sprite.scale.set(scale);
 }
 
-function baseArt(base: GameState["bases"][number], art: GameArt): { texture: Texture; anchorX: number; anchorY: number } {
-  if (base.owner === null) return { texture: art.garage, anchorX: 0.5, anchorY: 0.99 };
-  if (base.owner === "robots") {
-    if (base.rank === 1) return { texture: art.robot1, anchorX: 0.52, anchorY: 0.96 };
-    if (base.rank === 2) return { texture: art.robot2, anchorX: 0.49, anchorY: 0.97 };
-    return { texture: art.robot3, anchorX: 0.5, anchorY: 0.99 };
-  }
-  if (base.rank === 1) return { texture: art.human1, anchorX: 0.46, anchorY: 0.95 };
-  if (base.rank === 2) return { texture: art.human2, anchorX: 0.5, anchorY: 0.98 };
-  return { texture: art.human3, anchorX: 0.5, anchorY: 0.99 };
-}
-
 function drawBase(root: Container, grid: ReturnType<typeof createIsometricGrid>, game: GameState, base: GameState["bases"][number], art: GameArt): void {
   const { x, y } = tileCenter(grid, base.x, base.y);
   const color = base.owner === game.playerFaction ? 0xffbb39 : base.owner === game.botFaction ? 0xff5e83 : 0xffed91;
@@ -230,9 +288,13 @@ function drawBase(root: Container, grid: ReturnType<typeof createIsometricGrid>,
     .fill({ color, alpha: 0.19 });
   root.addChild(baseGlow);
 
-  const image = baseArt(base, art);
-  const city = addWorldSprite(root, image.texture, x, y, size * 1.9, grid.tileHeight * (base.rank >= 3 && base.owner ? 5 : 3.35));
-  city.anchor.set(image.anchorX, image.anchorY);
+  const kind = buildingKind(base);
+  const city = new Sprite(art[kind]);
+  const layout = buildingLayout(kind, city.texture, grid.tileWidth, grid.tileHeight);
+  city.anchor.set(layout.anchorX, layout.anchorY);
+  city.position.set(x, y);
+  city.scale.set(layout.scale);
+  root.addChild(city);
   if (base.rank >= 4 && base.owner) city.filters = [outline()];
 }
 
@@ -308,6 +370,7 @@ function drawUnit(
   attackable: boolean,
   position?: { x: number; y: number },
   forceVisible = false,
+  showShield = true,
 ): void {
   const tile = game.tiles[unit.y * game.size + unit.x];
   if (!tile || (!forceVisible && !tile.explored && unit.faction !== game.playerFaction)) return;
@@ -317,8 +380,9 @@ function drawUnit(
   character.anchor.set(0.5, unitAnchorY(unit));
   character.position.set(x, y);
   fitSprite(character, size * 1.35, unitTileHeight * 2.8);
+  const canAct = unit.faction === game.playerFaction && hasUnitAction(game, unit);
   if (attackable) character.tint = 0xff5555;
-  else if (unit.faction === game.playerFaction && unit.moved) character.tint = 0x888888;
+  else if (unit.faction === game.playerFaction && !canAct) character.tint = 0x888888;
 
   if (attackable) {
     const target = new Graphics();
@@ -332,13 +396,9 @@ function drawUnit(
     .fill({ color: 0x13263a, alpha: 0.45 });
 
   const isHuman = unit.faction === game.playerFaction;
-  if (!isHuman) {
-    characterDetails.circle(x, y, Math.max(1.3, size * 0.07))
-      .fill({ color: 0xff525c });
-  }
   root.addChild(characterDetails);
-  if (!attackable && unit.faction === game.playerFaction && !unit.moved) character.filters = [outline()];
-  if (unit.coffeeBoostTurn === game.turn && !unit.moved) {
+  if (!attackable && canAct) character.filters = [outline()];
+  if ((unit.coffeeMovementBoost || unit.coffeeBoostTurn === game.turn) && !unit.moved) {
     const wind = new Graphics();
     for (let i = 0; i < 3; i++) {
       const shift = (performance.now() / 12 + i * size * 0.45) % (size * 1.8);
@@ -361,19 +421,29 @@ function drawUnit(
     1,
   ).fill({ color: isHuman ? 0xffdf68 : 0x63ffe1 });
   root.addChild(health);
+  if (showShield && hasCover(game, unit)) {
+    const shield = new Graphics();
+    const sx = x + size * 0.47, sy = y - unitTileHeight * 1.65;
+    const s = Math.max(2.5, size * 0.14);
+    shield.poly([sx - s, sy - s * 0.7, sx + s, sy - s * 0.7, sx + s * 0.8, sy + s * 0.5, sx, sy + s, sx - s * 0.8, sy + s * 0.5])
+      .fill(0x469fe0).stroke({ color: 0xffffff, width: Math.max(1, size * 0.04) });
+    root.addChild(shield);
+  }
 }
 
 type ActiveCombat = { event: CombatEvent; started: number };
 type ActiveResource = { event: ResourceEvent; started: number };
-type ActiveIncome = { event: IncomeEvent; started: number };
+type ActiveIncome = { event: IncomeEvent; started: number; arrived: number };
 type Transformation = { started: number; previous: Base };
-const COMBAT_DURATION = 900;
-const RESOURCE_DURATION = 1700;
 
-function drawResourceEffect(root: Container, grid: ReturnType<typeof createIsometricGrid>, game: GameState, active: ActiveResource, now: number): void {
+function drawResourceEffect(root: Container, grid: ReturnType<typeof createIsometricGrid>, game: GameState, art: GameArt, active: ActiveResource, now: number): void {
   const progress = (now - active.started) / RESOURCE_DURATION;
   const target = tileCenter(grid, active.event.x, active.event.y);
   const base = game.bases.find((entry) => entry.id === active.event.baseId);
+  if (progress < 0.65) {
+    const smoke = addWorldSprite(root, art.smoke, target.x, target.y + grid.tileHeight * 0.5, grid.tileWidth * 2, grid.tileHeight * 3);
+    smoke.alpha = Math.min(1, progress * 12, (0.65 - progress) * 4);
+  }
   const effect = new Graphics();
   if (progress < 0.65) {
     const t = progress / 0.65;
@@ -386,9 +456,8 @@ function drawResourceEffect(root: Container, grid: ReturnType<typeof createIsome
   }
   if (base && progress >= 0.48) {
     const destination = tileCenter(grid, base.x, base.y);
-    const t = Math.min(1, (progress - 0.48) / 0.45);
     for (let i = 0; i < active.event.progress; i++) {
-      const phase = Math.max(0, Math.min(1, t - i * 0.07));
+      const phase = resourceStarProgress(now - active.started, i);
       effect.star(target.x + (destination.x - target.x) * phase, target.y + (destination.y - target.y) * phase - Math.sin(phase * Math.PI) * 20, 5, 5)
         .fill({ color: 0xffec83, alpha: 1 - phase * 0.5 });
     }
@@ -397,11 +466,10 @@ function drawResourceEffect(root: Container, grid: ReturnType<typeof createIsome
 }
 
 function drawIncomeEffect(root: Container, grid: ReturnType<typeof createIsometricGrid>, active: ActiveIncome, wallet: { x: number; y: number }, now: number): void {
-  const progress = (now - active.started) / RESOURCE_DURATION;
   const source = tileCenter(grid, active.event.x, active.event.y);
   const coins = new Graphics();
-  for (let i = 0; i < Math.min(active.event.amount, 5); i++) {
-    const t = Math.max(0, Math.min(1, (progress - i * 0.06) / 0.7));
+  for (let i = 0; i < incomeCoinCount(active.event.amount); i++) {
+    const t = incomeCoinProgress(now - active.started, i);
     if (t <= 0 || t >= 1) continue;
     coins.circle(source.x + (wallet.x - source.x) * t, source.y + (wallet.y - source.y) * t - Math.sin(t * Math.PI) * 35, 4)
       .fill({ color: 0xffd25c }).stroke({ color: 0x8c5c24, width: 1.5 });
@@ -420,6 +488,56 @@ function drawCombat(
 ): void {
   const { attacker, defender } = event;
   const melee = attacker.kind !== "courier" && attacker.kind !== "drone" && gridDistance(attacker, defender) === 1;
+  if (event.lethal) {
+    if (attacker.faction === "lorgoshki" && !melee && progress < 0.68) {
+      const from = unitPlacement(grid, game, attacker);
+      const to = unitPlacement(grid, game, defender);
+      const travel = Math.min(1, progress / 0.6);
+      const latte = new Sprite(art.icedLatte);
+      latte.anchor.set(0.5);
+      latte.position.set(from.x + (to.x - from.x) * travel,
+        from.y + (to.y - from.y) * travel - grid.tileHeight * 0.85 - Math.sin(travel * Math.PI) * grid.tileHeight);
+      fitSprite(latte, grid.tileWidth * 0.54, grid.tileWidth * 0.75);
+      root.addChild(latte);
+    }
+    const attackerPosition = event.advance ? advancePosition(attacker, defender, progress) : attacker;
+    drawUnit(root, grid, attacker, game, art, false, attackerPosition, true);
+    const point = tileCenter(grid, defender.x, defender.y);
+    if (defender.faction === "robots") {
+      if (progress < 0.25) drawUnit(root, grid, defender, game, art, false, defender, true);
+      for (let i = 0; i < 12; i++) {
+        const angle = i * Math.PI * 2 / 12 + event.id;
+        const spark = new Sprite(art.electricSpark);
+        spark.anchor.set(0.5);
+        spark.position.set(point.x + Math.cos(angle) * grid.tileWidth * progress * 1.5,
+          point.y - grid.tileHeight + Math.sin(angle) * grid.tileHeight * progress * 2);
+        spark.rotation = angle;
+        spark.alpha = 1 - progress;
+        fitSprite(spark, grid.tileWidth * 0.4, grid.tileHeight * 0.8);
+        root.addChild(spark);
+      }
+    } else {
+      const nearestEdge = [
+        { distance: defender.x + 1, x: -1, y: defender.y },
+        { distance: game.size - defender.x, x: game.size, y: defender.y },
+        { distance: defender.y + 1, x: defender.x, y: -1 },
+        { distance: game.size - defender.y, x: defender.x, y: game.size },
+      ].sort((a, b) => a.distance - b.distance)[0];
+      const position = {
+        x: defender.x + (nearestEdge.x - defender.x) * progress,
+        y: defender.y + (nearestEdge.y - defender.y) * progress,
+      };
+      drawUnit(root, grid, defender, game, art, false, position, true, false);
+      const location = tileCenter(grid, position.x, position.y);
+      const geese = addWorldSprite(root, art.geese, location.x - grid.tileWidth * 0.6, location.y + grid.tileHeight * 0.25, grid.tileWidth * 0.6, grid.tileHeight);
+      geese.alpha = Math.min(1, progress * 3);
+      const face = new Text({ text: "☹", style: { fontFamily: "Arial", fontSize: Math.max(12, grid.tileWidth * 0.4), fill: 0xffd75a, stroke: { color: 0x56391e, width: 2 } } });
+      face.anchor.set(0.5, 1);
+      face.position.set(location.x, location.y - grid.tileHeight * 2.7);
+      root.addChild(face);
+    }
+    return;
+  }
   const lunge = melee ? Math.sin(Math.PI * Math.min(progress / 0.75, 1)) * 0.55 : 0;
   const attackerPosition = {
     x: attacker.x + (defender.x - attacker.x) * lunge,
@@ -438,11 +556,11 @@ function drawCombat(
   const from = unitPlacement(grid, game, attacker, attackerPosition);
   const to = unitPlacement(grid, game, defender);
   const iconSize = Math.max(5, grid.tileWidth * 0.3);
-  if ((attacker.faction === "robots" || attacker.kind === "courier") && progress < 0.68) {
+  if ((attacker.faction === "robots" || !melee) && progress < 0.68) {
     const travel = Math.min(1, progress / 0.6);
     const x = from.x + (to.x - from.x) * travel;
     const y = from.y + (to.y - from.y) * travel - grid.tileHeight * 0.85 - Math.sin(travel * Math.PI) * grid.tileHeight;
-    if (attacker.kind === "courier") {
+    if (attacker.faction === "lorgoshki") {
       const latte = new Sprite(art.icedLatte);
       latte.anchor.set(0.5);
       latte.position.set(x, y);
@@ -556,16 +674,12 @@ function drawLatest(
     }
   }
   tiles.forEach((tile, index) => drawTileDetails(root, grid, game, tile, index, art, revealMap));
-
   const playerUnit = game.units.find((unit) => unit.id === selectedUnitId && unit.faction === game.playerFaction);
   if (selected) {
-    const canMove = !city && playerUnit && !playerUnit.moved;
+    const canMove = !city && playerUnit && !playerUnit.moved && !playerUnit.attacked;
     if (canMove) {
       for (const tile of game.tiles) {
-        const distance = gridDistance(tile, playerUnit);
-        const occupied = game.units.some((unit) => unit.x === tile.x && unit.y === tile.y);
-        if (distance === 0 || distance > movementRange(game, playerUnit) || occupied || tile.terrain === "water" || !tile.visible) continue;
-        if (!shortestPath(game, playerUnit, tile, movementRange(game, playerUnit))) continue;
+        if (!canMoveTo(game, playerUnit, tile)) continue;
         const { x, y } = tileCenter(grid, tile.x, tile.y);
         const marker = new Graphics();
         polygon(marker, diamond(x, y, grid.tileWidth * 0.55, grid.tileHeight * 0.55), 0x67efff, 0.45);
@@ -584,17 +698,21 @@ function drawLatest(
 
   for (const base of game.bases) {
     const transformation = transformations.get(base.id);
-    const progress = transformation ? Math.min(1, (performance.now() - transformation.started) / 1200) : 1;
+    const frame = transformation ? transformationFrame(performance.now() - transformation.started) : undefined;
     if (revealMap || game.tiles[base.y * game.size + base.x]?.explored || base.owner === game.playerFaction) {
-      drawBase(root, grid, game, transformation && progress < 0.5 ? transformation.previous : base, art);
+      const building = new Container();
+      building.x = (frame?.shake ?? 0) * grid.tileWidth * 0.1;
+      drawBase(building, grid, game, transformation && frame?.previous ? transformation.previous : base, art);
+      root.addChild(building);
     }
-    if (transformation && (revealMap || game.tiles[base.y * game.size + base.x]?.explored)) {
+    if (frame && (revealMap || game.tiles[base.y * game.size + base.x]?.explored || base.owner === game.playerFaction)) {
       const { x, y } = tileCenter(grid, base.x, base.y);
-      const fireworks = addWorldSprite(root, art.fireworks, x, y + grid.tileHeight * 0.4, grid.tileWidth * 4.5, grid.tileHeight * 7);
-      fireworks.alpha = Math.min(1, progress * 5, (1 - progress) * 3);
+      const smoke = addWorldSprite(root, art.smoke, x, y + grid.tileHeight * 0.5, grid.tileWidth * 2.3, grid.tileHeight * 3.5);
+      smoke.alpha = frame.flash * 0.85;
     }
   }
   for (const unit of game.units) {
+    if (unit.id === selectedUnitId) continue;
     if (combat && (unit.id === combat.event.attacker.id || unit.id === combat.event.defender.id)) continue;
     const attackable = Boolean(playerUnit && canAttack(game, playerUnit, unit));
     drawUnit(root, grid, unit, game, art, attackable, animatedPositions.get(unit.id), revealMap);
@@ -627,17 +745,48 @@ function drawLatest(
     const icon = addWorldSprite(root, art.treasury, x, y - grid.tileHeight * 3 + Math.sin(performance.now() / 400) * grid.tileHeight * 0.15, grid.tileWidth * 0.65, grid.tileHeight * 1.3);
     icon.filters = [outline()];
   }
-  if (combat) drawCombat(root, grid, game, art, combat.event, combat.progress, language);
+  const selectedInCombat = combat && (selectedUnitId === combat.event.attacker.id || selectedUnitId === combat.event.defender.id);
+  if (combat && !selectedInCombat) drawCombat(root, grid, game, art, combat.event, combat.progress, language);
   for (const base of game.bases) drawCaptureBadge(root, grid, game, base, art, language, revealMap);
-  for (const resource of activeResources) drawResourceEffect(root, grid, game, resource, performance.now());
+  for (const base of game.bases) {
+    if (!base.owner || (!revealMap && !game.tiles[base.y * game.size + base.x]?.explored && base.owner !== game.playerFaction)) continue;
+    const kind = buildingKind(base);
+    const layout = buildingLayout(kind, art[kind], grid.tileWidth, grid.tileHeight);
+    const { x, y } = tileCenter(grid, base.x, base.y);
+    const count = base.rank < 4 ? progressToNextRank(base.rank) : 4;
+    const cell = Math.max(4, grid.tileWidth * 0.2), gap = Math.max(1, grid.tileWidth * 0.04);
+    const top = y - art[kind].height * layout.scale * layout.anchorY - cell * 1.5;
+    const bar = new Graphics();
+    for (let i = 0; i < count; i++) {
+      bar.roundRect(x - (count * cell + (count - 1) * gap) / 2 + i * (cell + gap), top, cell, cell * 0.62, 1)
+        .fill(i < (base.rank >= 4 ? count : base.progress) ? 0xffdc5d : 0x243b4c)
+        .stroke({ color: 0xffffff, width: 0.8 });
+    }
+    const capacity = cityCapacity(base), occupied = cityOccupancy(game, base);
+    for (let i = 0; i < capacity; i++) {
+      bar.circle(x + (i - (capacity - 1) / 2) * (cell + gap), top - cell * 0.65, cell * 0.24)
+        .fill(i < occupied ? 0x70e8ff : 0x243b4c).stroke({ color: 0xffffff, width: 0.6 });
+    }
+    root.addChild(bar);
+  }
+  if (playerUnit && (!combat || (playerUnit.id !== combat.event.attacker.id && playerUnit.id !== combat.event.defender.id))) {
+    drawUnit(root, grid, playerUnit, game, art, false, animatedPositions.get(playerUnit.id), revealMap);
+  }
+  if (combat && selectedInCombat) drawCombat(root, grid, game, art, combat.event, combat.progress, language);
+  for (const resource of activeResources) drawResourceEffect(root, grid, game, art, resource, performance.now());
   for (const income of activeIncome) drawIncomeEffect(root, grid, income, wallet, performance.now());
 }
 
-export default function MapView({ game, selected, selectedUnitId, selectedCityId, language, revealMap, combatEvents, resourceEvents, incomeEvents, onTileClick, onCapture, onCollectCoins }: Props) {
+export default function MapView({ game, selected, selectedUnitId, selectedCityId, language, revealMap, combatEvents, resourceEvents, incomeEvents, movementEvents, focusTarget, onFocusArrived, onIncomeArrived, onResourceArrived, onAnimationsFinished, onTileClick, onSelectCoffee, onCapture, onCollectCoins }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
   const rootRef = useRef<Container | null>(null);
   const callbackRef = useRef(onTileClick);
+  const coffeeRef = useRef(onSelectCoffee);
+  const incomeArrivedRef = useRef(onIncomeArrived);
+  const resourceArrivedRef = useRef(onResourceArrived);
+  const animationsFinishedRef = useRef(onAnimationsFinished);
+  const focusArrivedRef = useRef(onFocusArrived);
   const captureRef = useRef(onCapture);
   const collectCoinsRef = useRef(onCollectCoins);
   const selectedRef = useRef(selected);
@@ -652,15 +801,18 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
   const previousUnitsRef = useRef(new Map<string, { x: number; y: number }>());
   const previousBasesRef = useRef(new Map<string, Base>());
   const transformationsRef = useRef(new Map<string, Transformation>());
-  const animationsRef = useRef(new Map<string, { from: { x: number; y: number }; to: { x: number; y: number }; started: number }>());
+  const animationsRef = useRef(new Map<string, { from: { x: number; y: number }; to: { x: number; y: number }; path?: Array<{ x: number; y: number }>; started: number }>());
+  const lastMovementIdRef = useRef(0);
   const combatQueueRef = useRef<CombatEvent[]>([]);
   const activeCombatRef = useRef<ActiveCombat | null>(null);
   const lastCombatIdRef = useRef(0);
+  const lastPositionCombatIdRef = useRef(0);
   const lastResourceIdRef = useRef(0);
   const activeResourcesRef = useRef<ActiveResource[]>([]);
   const lastIncomeIdRef = useRef(0);
   const activeIncomeRef = useRef<ActiveIncome[]>([]);
   const panRef = useRef({ x: 0, y: 0 });
+  const cameraRef = useRef<{ id: number; from: { x: number; y: number }; to: { x: number; y: number }; started: number } | null>(null);
   const dragRef = useRef<{ x: number; y: number; panX: number; panY: number; moved: boolean } | null>(null);
   const [zoom, setZoom] = useState(1.35);
   const [ready, setReady] = useState(false);
@@ -672,6 +824,11 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
   })));
 
   useEffect(() => { callbackRef.current = onTileClick; }, [onTileClick]);
+  useEffect(() => { coffeeRef.current = onSelectCoffee; }, [onSelectCoffee]);
+  useEffect(() => { incomeArrivedRef.current = onIncomeArrived; }, [onIncomeArrived]);
+  useEffect(() => { resourceArrivedRef.current = onResourceArrived; }, [onResourceArrived]);
+  useEffect(() => { animationsFinishedRef.current = onAnimationsFinished; }, [onAnimationsFinished]);
+  useEffect(() => { focusArrivedRef.current = onFocusArrived; }, [onFocusArrived]);
   useEffect(() => { captureRef.current = onCapture; }, [onCapture]);
   useEffect(() => { collectCoinsRef.current = onCollectCoins; }, [onCollectCoins]);
   useEffect(() => { selectedRef.current = selected; }, [selected]);
@@ -682,6 +839,19 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
   useEffect(() => { gameRef.current = game; }, [game]);
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   useEffect(() => { zoomSetterRef.current = setZoom; }, []);
+
+  useEffect(() => {
+    const app = appRef.current;
+    if (!focusTarget || !app) return;
+    const grid = createIsometricGrid(app.screen.width, app.screen.height, gameRef.current.size);
+    const target = tileCenter(grid, focusTarget.x, focusTarget.y);
+    cameraRef.current = {
+      id: focusTarget.id,
+      from: { ...panRef.current },
+      to: { x: (app.screen.width / 2 - target.x) * zoomRef.current, y: (app.screen.height / 2 - target.y) * zoomRef.current },
+      started: performance.now(),
+    };
+  }, [focusTarget, ready]);
 
   useEffect(() => {
     const incoming = combatEvents.filter((event) => event.id > lastCombatIdRef.current);
@@ -702,7 +872,7 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
   useEffect(() => {
     const incoming = incomeEvents.filter((event) => event.id > lastIncomeIdRef.current);
     if (incoming.length) {
-      activeIncomeRef.current.push(...incoming.map((event) => ({ event, started: performance.now() })));
+      activeIncomeRef.current.push(...incoming.map((event) => ({ event, started: performance.now(), arrived: 0 })));
       lastIncomeIdRef.current = incoming[incoming.length - 1].id;
     }
   }, [incomeEvents]);
@@ -712,11 +882,22 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
     const now = performance.now();
     for (const unit of game.units) {
       const oldPosition = previous.get(unit.id);
-      if (oldPosition && (oldPosition.x !== unit.x || oldPosition.y !== unit.y)) {
+      const combatAdvance = combatEvents.some((event) => event.id > lastPositionCombatIdRef.current && event.advance && event.attacker.id === unit.id);
+      if (!combatAdvance && unit.faction === game.playerFaction && oldPosition && (oldPosition.x !== unit.x || oldPosition.y !== unit.y)) {
         animationsRef.current.set(unit.id, { from: oldPosition, to: { x: unit.x, y: unit.y }, started: now });
       }
     }
+    let start = Math.max(now, ...Array.from(animationsRef.current.values(), (animation) => animation.started + 220));
+    const incoming = movementEvents.filter((event) => event.id > lastMovementIdRef.current);
+    for (const event of incoming) {
+      if (game.units.some((unit) => unit.id === event.unitId)) {
+        animationsRef.current.set(event.unitId, { from: event.from, to: event.to, path: event.path, started: start });
+        start += 220;
+      }
+      lastMovementIdRef.current = event.id;
+    }
     previousUnitsRef.current = new Map(game.units.map((unit) => [unit.id, { x: unit.x, y: unit.y }]));
+    if (combatEvents.length) lastPositionCombatIdRef.current = combatEvents[combatEvents.length - 1].id;
     for (const base of game.bases) {
       const previous = previousBasesRef.current.get(base.id);
       if (previous && (previous.owner !== base.owner || previous.rank !== base.rank) && game.tiles[base.y * game.size + base.x]?.explored) {
@@ -724,7 +905,7 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
       }
     }
     previousBasesRef.current = new Map(game.bases.map((base) => [base.id, { ...base }]));
-  }, [game]);
+  }, [game, movementEvents, combatEvents]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -783,7 +964,7 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
           && unscaledPoint.y >= bottom - grid.tileHeight * 2 && unscaledPoint.y <= bottom;
       });
       if (coffee) {
-        callbackRef.current(coffee.x, coffee.y);
+        coffeeRef.current(coffee.unitId);
         return;
       }
       const capture = currentGame.bases.find((base) => {
@@ -802,41 +983,44 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
         captureRef.current(capture.id, capture.capture.unitId);
         return;
       }
-      const attacker = currentGame.units.find((unit) => unit.id === selectedUnitIdRef.current && unit.faction === currentGame.playerFaction);
-      if (attacker && artRef.current) {
-        const target = [...currentGame.units].reverse().find((unit) => {
-          if (!canAttack(currentGame, attacker, unit)) return false;
-          const { x, y, size, tileHeight } = unitPlacement(grid, currentGame, unit);
-          const texture = getUnitTexture(artRef.current!, unit);
-          const scale = Math.min(size * 1.35 / texture.width, tileHeight * 2.8 / texture.height);
-          return Math.abs(unscaledPoint.x - x) <= texture.width * scale / 2
-            && unscaledPoint.y >= y - texture.height * scale * unitAnchorY(unit)
-            && unscaledPoint.y <= y + texture.height * scale * (1 - unitAnchorY(unit));
-        });
-        if (target) {
-          callbackRef.current(target.x, target.y);
+      const tile = screenToTile(grid, unscaledPoint);
+      const selectedMover = currentGame.units.find((unit) => unit.id === selectedUnitIdRef.current && unit.faction === currentGame.playerFaction);
+      if (tile) {
+        const center = tileCenter(grid, tile.x, tile.y);
+        const markerDistance = Math.abs(unscaledPoint.x - center.x) / grid.tileWidth
+          + Math.abs(unscaledPoint.y - center.y) / grid.tileHeight;
+        const tileData = currentGame.tiles[tile.y * currentGame.size + tile.x];
+        if ((selectedMover && canMoveTo(currentGame, selectedMover, tile))
+          || (markerDistance <= 0.55 && !selectedMover && (tileData.poi || resourceCity(currentGame, tileData)))) {
+          callbackRef.current(tile.x, tile.y);
           return;
         }
       }
-      const tile = screenToTile(grid, unscaledPoint);
-      if (!selectedUnitIdRef.current && artRef.current
-        && (!tile || (!currentGame.tiles[tile.y * currentGame.size + tile.x]?.poi
-          && !resourceCity(currentGame, currentGame.tiles[tile.y * currentGame.size + tile.x])))
+      if (artRef.current
         && (!tile || !currentGame.units.some((unit) => unit.x === tile.x && unit.y === tile.y
           && (unit.faction === currentGame.playerFaction || currentGame.tiles[tile.y * currentGame.size + tile.x]?.explored)))) {
         const art = artRef.current;
+        const contains = (position: { x: number; y: number }, texture: Texture, layout: ReturnType<typeof buildingLayout>) => {
+          const center = tileCenter(grid, position.x, position.y);
+          const width = texture.width * layout.scale, height = texture.height * layout.scale;
+          return unscaledPoint.x >= center.x - width * layout.anchorX && unscaledPoint.x <= center.x + width * (1 - layout.anchorX)
+            && unscaledPoint.y >= center.y - height * layout.anchorY && unscaledPoint.y <= center.y + height * (1 - layout.anchorY);
+        };
         const hit = [...currentGame.bases].reverse().find((base) => {
           if (!revealMapRef.current && !currentGame.tiles[base.y * currentGame.size + base.x]?.explored && base.owner !== currentGame.playerFaction) return false;
-          const image = baseArt(base, art);
-          const scale = Math.min(grid.tileWidth * 1.9 / image.texture.width,
-            grid.tileHeight * (base.rank >= 3 && base.owner ? 5 : 3.35) / image.texture.height);
-          const width = image.texture.width * scale, height = image.texture.height * scale;
-          const center = tileCenter(grid, base.x, base.y);
-          return unscaledPoint.x >= center.x - width * image.anchorX && unscaledPoint.x <= center.x + width * (1 - image.anchorX)
-            && unscaledPoint.y >= center.y - height * image.anchorY && unscaledPoint.y <= center.y + height * (1 - image.anchorY);
+          if (selectedMover && !canMoveTo(currentGame, selectedMover, base)) return false;
+          const kind = buildingKind(base);
+          return contains(base, art[kind], buildingLayout(kind, art[kind], grid.tileWidth, grid.tileHeight));
         });
         if (hit) {
           callbackRef.current(hit.x, hit.y);
+          return;
+        }
+        const coffeeShop = [...currentGame.tiles].reverse().find((entry) => entry.poi === "coffee" && !entry.poiClaimed
+          && (entry.explored || revealMapRef.current) && (!selectedMover || canMoveTo(currentGame, selectedMover, entry))
+          && contains(entry, art.coffee, buildingLayout("coffee", art.coffee, grid.tileWidth, grid.tileHeight)));
+        if (coffeeShop) {
+          callbackRef.current(coffeeShop.x, coffeeShop.y);
           return;
         }
       }
@@ -938,25 +1122,50 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
     if (!root || !app) return;
     const attacker = game.units.find((unit) => unit.id === selectedUnitId && unit.faction === game.playerFaction);
     const lethal = Boolean(attacker && game.units.some((target) => canAttack(game, attacker, target) && damage(attacker, target, game) >= target.hp));
-    const idleAnimation = game.units.some((unit) => unit.faction === game.playerFaction && (
-      (unit.coffeeBoostTurn === game.turn && !unit.moved)
+    const idleAnimation = game.status === "running" && game.units.some((unit) => unit.faction === game.playerFaction && (
+      ((unit.coffeeMovementBoost || unit.coffeeBoostTurn === game.turn) && !unit.moved)
       || game.coffeeBreaks.some((entry) => entry.unitId === unit.id && entry.readyTurn <= game.turn && entry.x === unit.x && entry.y === unit.y)
       || game.coinVisits.some((entry) => entry.unitId === unit.id && entry.readyTurn <= game.turn && entry.x === unit.x && entry.y === unit.y && !unit.moved && !unit.attacked)
       || game.bases.some((base) => base.capture?.unitId === unit.id && base.capture.readyTurn <= game.turn && !unit.moved && !unit.attacked)
     ));
-    if (!animationsRef.current.size && !combatQueueRef.current.length && !activeCombatRef.current && !transformationsRef.current.size && !activeResourcesRef.current.length && !activeIncomeRef.current.length && !lethal && !idleAnimation) {
+    if (!cameraRef.current && !animationsRef.current.size && !combatQueueRef.current.length && !activeCombatRef.current && !transformationsRef.current.size && !activeResourcesRef.current.length && !activeIncomeRef.current.length && !lethal && !idleAnimation) {
       if (artRef.current) drawLatest(root, app, game, selected, selectedUnitId, artRef.current, zoom, new Map(), panRef.current, undefined, selectedCityId, language, new Map(), revealMap);
+      if (game.status !== "running") animationsFinishedRef.current();
       return;
     }
     let lastDraw = 0;
     const tick = () => {
       const now = performance.now();
-      activeResourcesRef.current = activeResourcesRef.current.filter((entry) => now - entry.started < RESOURCE_DURATION);
-      activeIncomeRef.current = activeIncomeRef.current.filter((entry) => now - entry.started < RESOURCE_DURATION);
+      const camera = cameraRef.current;
+      if (camera) {
+        const progress = Math.min(1, (now - camera.started) / BOT_FOCUS_DURATION);
+        const eased = progress * progress * (3 - 2 * progress);
+        panRef.current = {
+          x: camera.from.x + (camera.to.x - camera.from.x) * eased,
+          y: camera.from.y + (camera.to.y - camera.from.y) * eased,
+        };
+        if (progress === 1) {
+          cameraRef.current = null;
+          focusArrivedRef.current(camera.id);
+        }
+      }
+      activeResourcesRef.current = activeResourcesRef.current.filter((entry) => {
+        if (now - entry.started < RESOURCE_ARRIVAL) return true;
+        resourceArrivedRef.current(entry.event.id);
+        return false;
+      });
+      for (const entry of activeIncomeRef.current) {
+        const count = incomeCoinCount(entry.event.amount);
+        while (entry.arrived < count && incomeCoinProgress(now - entry.started, entry.arrived) >= 1) {
+          incomeArrivedRef.current(entry.event.id, incomeCoinAmount(entry.event.amount, entry.arrived), entry.arrived === count - 1);
+          entry.arrived++;
+        }
+      }
+      activeIncomeRef.current = activeIncomeRef.current.filter((entry) => now - entry.started < INCOME_DURATION);
       if (now - lastDraw < 33) return;
       lastDraw = now;
       for (const [id, transformation] of transformationsRef.current) {
-        if (now - transformation.started >= 1200) transformationsRef.current.delete(id);
+        if (now - transformation.started >= TRANSFORMATION_DURATION) transformationsRef.current.delete(id);
       }
       if (!activeCombatRef.current && combatQueueRef.current.length) {
         activeCombatRef.current = { event: combatQueueRef.current.shift()!, started: now };
@@ -965,11 +1174,16 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
       const combat = activeCombat ? { event: activeCombat.event, progress: Math.min(1, (now - activeCombat.started) / COMBAT_DURATION) } : undefined;
       const positions = new Map<string, { x: number; y: number }>();
       for (const [id, animation] of animationsRef.current) {
-        const progress = Math.min(1, (now - animation.started) / 320);
+        const progress = Math.max(0, Math.min(1, (now - animation.started) / 220));
         const eased = 1 - (1 - progress) ** 3;
+        const path = animation.path ?? [animation.to];
+        const step = Math.min(path.length - 1, Math.floor(eased * path.length));
+        const from = step ? path[step - 1] : animation.from;
+        const to = path[step];
+        const fraction = Math.min(1, eased * path.length - step);
         positions.set(id, {
-          x: animation.from.x + (animation.to.x - animation.from.x) * eased,
-          y: animation.from.y + (animation.to.y - animation.from.y) * eased,
+          x: from.x + (to.x - from.x) * fraction,
+          y: from.y + (to.y - from.y) * fraction,
         });
         if (progress === 1) animationsRef.current.delete(id);
       }
@@ -981,14 +1195,17 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
       } : { x: app.screen.width, y: 0 };
       if (artRef.current) drawLatest(root, app, gameRef.current, selectedRef.current, selectedUnitIdRef.current, artRef.current, zoomRef.current, positions, panRef.current, combat, selectedCityIdRef.current, languageRef.current, transformationsRef.current, revealMapRef.current, activeResourcesRef.current, activeIncomeRef.current, wallet);
       if (combat?.progress === 1) activeCombatRef.current = null;
-      if (!animationsRef.current.size && !combatQueueRef.current.length && !activeCombatRef.current && !transformationsRef.current.size && !activeResourcesRef.current.length && !activeIncomeRef.current.length && !lethal && !idleAnimation) {
+      if (gameRef.current.status !== "running" && !animationsRef.current.size && !combatQueueRef.current.length && !activeCombatRef.current && !transformationsRef.current.size && !activeResourcesRef.current.length && !activeIncomeRef.current.length) {
+        animationsFinishedRef.current();
+      }
+      if (!cameraRef.current && !animationsRef.current.size && !combatQueueRef.current.length && !activeCombatRef.current && !transformationsRef.current.size && !activeResourcesRef.current.length && !activeIncomeRef.current.length && !lethal && !idleAnimation) {
         if (artRef.current) drawLatest(root, app, gameRef.current, selectedRef.current, selectedUnitIdRef.current, artRef.current, zoomRef.current, positions, panRef.current, undefined, selectedCityIdRef.current, languageRef.current, new Map(), revealMapRef.current);
         app.ticker.remove(tick);
       }
     };
     app.ticker.add(tick);
-    return () => { app.ticker.remove(tick); };
-  }, [game, selected, selectedUnitId, selectedCityId, language, zoom, combatEvents, resourceEvents, incomeEvents, ready, revealMap]);
+    return () => { if (appRef.current === app) app.ticker.remove(tick); };
+  }, [game, selected, selectedUnitId, selectedCityId, language, zoom, combatEvents, resourceEvents, incomeEvents, ready, revealMap, focusTarget]);
 
   return <div className="map-canvas" ref={hostRef}>
     <div className="cloud-sky" aria-hidden="true">

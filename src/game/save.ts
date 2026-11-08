@@ -10,6 +10,7 @@ const unit = z.object({
   kind: z.enum(["junior", "courier", "middle", "senior", "workerBot", "drone", "vacuum"]),
   homeBaseId: z.string().nullable(), hp: z.number().positive(), moved: z.boolean(), attacked: z.boolean(),
   coffeeBoostTurn: z.number().int().positive().optional(),
+  coffeeMovementBoost: z.boolean().optional(),
 });
 const base = z.object({
   id: z.string().min(1), name, ...position, owner: faction.nullable(), rank: z.number().int().min(1).max(4),
@@ -21,6 +22,7 @@ const tile = z.object({
   ...position, terrain: z.enum(["plain", "forest", "mountain", "water"]), geese: z.boolean(),
   poi: z.enum(["coffee", "treasury"]).nullable(), poiClaimed: z.boolean(), explored: z.boolean(), visible: z.boolean(),
   harvestedBy: faction.optional(),
+  bridge: z.object({ axis: z.enum(["x", "y"]), faction }).optional(),
 });
 const tech = z.tuple([z.number().int().min(0).max(3), z.number().int().min(0).max(3), z.number().int().min(0).max(3)]);
 const tokenPair = z.object({ lorgoshki: z.number().nonnegative(), robots: z.number().nonnegative() });
@@ -34,6 +36,7 @@ export const savedGameSchema: z.ZodType<GameState> = z.object({
   nextEventId: z.number().int().positive(),
   coffeeBreaks: z.array(z.object({ ...position, unitId: z.string(), readyTurn: z.number().int().positive() })),
   coinVisits: z.array(z.object({ ...position, unitId: z.string(), readyTurn: z.number().int().positive() })).default([]),
+  pendingProgress: z.array(z.object({ id: z.number().int().positive(), ...position, baseId: z.string(), faction, cost: z.number().int().nonnegative(), progress: z.number().int().positive() })).optional(),
   status: z.literal("running"),
 }).superRefine((state, ctx) => {
   const valid = state.tiles.length === state.size * state.size
@@ -45,6 +48,10 @@ export const savedGameSchema: z.ZodType<GameState> = z.object({
       && (unit.homeBaseId === null || state.bases.some((base) => base.id === unit.homeBaseId && base.owner === unit.faction)))
     && state.coffeeBreaks.every((coffee) => coffee.x < state.size && coffee.y < state.size)
     && state.coinVisits.every((visit) => visit.x < state.size && visit.y < state.size)
+    && (state.pendingProgress ?? []).every((entry) => entry.x < state.size && entry.y < state.size
+      && entry.id < state.nextEventId && state.bases.some((base) => base.id === entry.baseId))
+    && new Set((state.pendingProgress ?? []).map((entry) => entry.id)).size === (state.pendingProgress ?? []).length
+    && state.tiles.every((tile) => !tile.bridge || tile.terrain === "water")
     && state.bases.every((base) => !base.capture || state.units.some((unit) => unit.id === base.capture?.unitId
       && unit.faction === base.capture.faction && unit.x === base.x && unit.y === base.y))
     && new Set(state.units.map((unit) => unit.id)).size === state.units.length

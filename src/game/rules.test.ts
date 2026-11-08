@@ -5,13 +5,20 @@ import { makeIdentity } from "./names";
 import {
   canHarvestWithinCity,
   canAttack,
+  canBuildBridge,
+  bridgeAxis,
+  canMoveTo,
   cityCapacity,
   cityOccupancy,
   createGame,
   damage,
+  effectiveAttack,
   expandResourceArea,
   incomeForRank,
   gridDistance,
+  hasUnitAction,
+  hasCover,
+  logEvent,
   progressToNextRank,
   revealAround,
   resourceCity,
@@ -36,8 +43,29 @@ describe("game rules", () => {
     expect(first.bases).toHaveLength(8);
     expect(first.bases.filter((base) => base.owner === null)).toHaveLength(6);
     expect(first.units).toHaveLength(2);
-    expect(first.units[0].x).toBe(2);
-    expect(first.units[1].x).toBe(13);
+    expect(first.units[0].x + first.units[1].x).toBe(15);
+    expect(first.units[0].y + first.units[1].y).toBe(15);
+  });
+
+  it("uses all four starting corners across seeds", () => {
+    const corners = new Set(Array.from({ length: 60 }, (_, i) => {
+      const { x, y } = createGame(`corner-${i}`, 16, "lorgoshki").units[0];
+      return `${x},${y}`;
+    }));
+    expect(corners).toEqual(new Set(["2,2", "2,13", "13,2", "13,13"]));
+  });
+
+  it("keeps a noticeably larger share of water after placing connected locations", () => {
+    const games = Array.from({ length: 60 }, (_, i) => createGame(`water-${i}`, 16, "lorgoshki"));
+    const fraction = games.reduce((sum, game) => sum + game.tiles.filter((tile) => tile.terrain === "water").length / game.tiles.length, 0) / games.length;
+    expect(fraction).toBeGreaterThan(0.12);
+  });
+
+  it("retains the complete game log", () => {
+    const game = createGame("full-log", 16, "lorgoshki");
+    for (let i = 0; i < 120; i++) logEvent(game, `событие ${i}`, `event ${i}`);
+    expect(game.logs).toHaveLength(120);
+    expect(game.logs[119].en).toBe("event 0");
   });
 
   it.each(MAP_SIZES)("generates connected, spaced worlds of size %i across many seeds", (size) => {
@@ -110,7 +138,8 @@ describe("game rules", () => {
 
   it("reveals square areas and keeps explored cells permanently explored", () => {
     const game = createGame("square-fog", 16, "lorgoshki");
-    const diagonal = game.tiles[4 * game.size + 4];
+    const base = game.bases[0];
+    const diagonal = game.tiles[(base.y + (base.y < 8 ? 2 : -2)) * game.size + base.x + (base.x < 8 ? 2 : -2)];
     expect(diagonal.visible).toBe(true);
 
     diagonal.visible = false;
@@ -130,7 +159,8 @@ describe("game rules", () => {
     revealAround(game);
     expect(game.tiles[9 * game.size + 9].visible).toBe(true);
     expect(game.tiles[10 * game.size + 8].visible).toBe(false);
-    expect(game.tiles[2 * game.size + 4].visible).toBe(true);
+    const base = game.bases[0];
+    expect(game.tiles[base.y * game.size + base.x].visible).toBe(true);
   });
 
   it("reveals a radius of three from mountains and retains exploration after leaving", () => {
@@ -201,10 +231,84 @@ describe("game rules", () => {
     const game = createGame("combat", 16, "lorgoshki");
     const junior = game.units[0];
     const robot = game.units[1];
+    Object.assign(robot, { x: 8, y: 8 });
+    game.tiles[8 * game.size + 8].terrain = "plain";
     expect(damage(junior, robot, game)).toBe(4);
 
     game.tech.lorgoshki[1] = 2;
     expect(damage(junior, robot, game)).toBe(5);
+  });
+
+  it("scales attack with health and applies 25% terrain cover after rounding", () => {
+    const game = createGame("cover-combat", 16, "lorgoshki");
+    const [attacker, defender] = game.units;
+    attacker.kind = "senior";
+    attacker.hp = 15;
+    defender.kind = "vacuum";
+    defender.hp = 14;
+    Object.assign(defender, { x: 8, y: 8 });
+    game.bases = game.bases.filter((base) => base.x !== 8 || base.y !== 8);
+    const tile = game.tiles[defender.y * game.size + defender.x];
+    tile.terrain = "plain";
+    const fullDamage = damage(attacker, defender, game);
+    expect(fullDamage).toBe(8);
+    for (const terrain of ["forest", "mountain"] as const) {
+      tile.terrain = terrain;
+      expect(damage(attacker, defender, game)).toBe(Math.round(7.5 * 0.75));
+    }
+    tile.terrain = "plain";
+    attacker.hp = 5;
+    expect(effectiveAttack(game, attacker)).toBe(1.5);
+    expect(damage(attacker, defender, game)).toBe(3);
+    tile.terrain = "forest";
+    expect(damage(attacker, defender, game)).toBe(2);
+    tile.poi = null;
+    tile.poiClaimed = true;
+    expect(damage(attacker, defender, game)).toBe(3);
+  });
+
+  it("protects only a company's owner, not a unit capturing it", () => {
+    const game = createGame("city-cover", 16, "lorgoshki");
+    const base = game.bases[1];
+    const [attacker, defender] = game.units;
+    expect(hasCover(game, defender)).toBe(true);
+    const defendedDamage = damage(attacker, defender, game);
+    base.owner = null;
+    const unprotectedDamage = damage(attacker, defender, game);
+    expect(defendedDamage).toBeLessThan(unprotectedDamage);
+    base.owner = defender.faction;
+    base.capture = { unitId: attacker.id, faction: attacker.faction, readyTurn: game.turn + 1 };
+    Object.assign(attacker, { x: base.x, y: base.y });
+    expect(hasCover(game, attacker)).toBe(false);
+    delete base.capture;
+    base.owner = attacker.faction;
+    expect(hasCover(game, attacker)).toBe(true);
+  });
+
+  it("makes defensive research reduce, not increase, damage received", () => {
+    const game = createGame("defensive-research", 16, "lorgoshki");
+    const [attacker, defender] = game.units;
+    Object.assign(defender, { x: 8, y: 8 });
+    game.bases = game.bases.filter((base) => base.x !== 8 || base.y !== 8);
+    game.tiles[8 * game.size + 8].terrain = "plain";
+    const before = damage(attacker, defender, game);
+    game.tech[defender.faction][0] = 1;
+    expect(damage(attacker, defender, game)).toBeLessThan(before);
+  });
+
+  it("keeps a moved ranged unit active only while a target is in range", () => {
+    const game = createGame("remaining-actions", 16, "lorgoshki");
+    const [unit, enemy] = game.units;
+    Object.assign(unit, { kind: "courier", hp: 4, x: 5, y: 5, moved: true, attacked: false });
+    Object.assign(enemy, { x: 7, y: 7 });
+    game.tiles[7 * game.size + 7].explored = true;
+    expect(canAttack(game, unit, enemy)).toBe(true);
+    expect(hasUnitAction(game, unit)).toBe(true);
+    enemy.x = 8;
+    expect(hasUnitAction(game, unit)).toBe(false);
+    unit.attacked = true;
+    enemy.x = 7;
+    expect(hasUnitAction(game, unit)).toBe(false);
   });
 
   it("measures city capacity per city, not across the whole faction", () => {
@@ -235,7 +339,7 @@ describe("game rules", () => {
       attacker.attacked = false;
       defender.x += 1;
       expect(canAttack(game, attacker, defender)).toBe(false);
-      game.tech[faction][1] = 1;
+      game.tech[faction][1] = 2;
       revealAround(game);
       expect(canAttack(game, attacker, defender)).toBe(true);
       game.tiles[defender.y * game.size + defender.x].visible = false;
@@ -254,9 +358,7 @@ describe("game rules", () => {
     game.tiles = game.tiles.map((tile) => ({ ...tile, terrain: "plain" }));
     game.tiles[1].terrain = "water";
     expect(shortestPath(game, { x: 0, y: 0 }, { x: 2, y: 0 })).toEqual([
-      { x: 0, y: 1 },
       { x: 1, y: 1 },
-      { x: 2, y: 1 },
       { x: 2, y: 0 },
     ]);
 
@@ -266,12 +368,46 @@ describe("game rules", () => {
     expect(shortestPath(game, { x: 0, y: 0 }, { x: 2, y: 0 })).toBeNull();
   });
 
-  it("moves diagonally in one step without cutting across blocked corners", () => {
+  it("allows bridges only between opposite shores and restricts travel to their axis", () => {
+      const game = createGame("bridge-rules", 16, "lorgoshki");
+      const base = game.bases[0];
+      Object.assign(base, { x: 5, y: 5 });
+      game.tiles = game.tiles.map((tile) => ({ ...tile, terrain: "plain", poi: null, explored: true }));
+      game.units.forEach((unit) => { unit.x = 10; unit.y = 10; });
+      const tile = game.tiles[5 * game.size + 5 + 1];
+      tile.terrain = "water";
+      game.tokens.lorgoshki = 5;
+      expect(canBuildBridge(game, base, tile, "x")).toBe(true);
+      expect(canBuildBridge(game, base, tile, "y")).toBe(true);
+      expect(bridgeAxis(game, base, tile)).toBe("x");
+      game.tiles[5 * game.size + 7].terrain = "water";
+      expect(bridgeAxis(game, base, tile)).toBe("y");
+      game.tiles[5 * game.size + 7].terrain = "plain";
+      game.tiles[4 * game.size + 6].terrain = "water";
+      expect(canBuildBridge(game, base, tile, "y")).toBe(false);
+      game.tiles[5 * game.size + 7].terrain = "water";
+      expect(bridgeAxis(game, base, tile)).toBeUndefined();
+      game.tiles[5 * game.size + 7].terrain = "plain";
+      tile.bridge = { axis: "x", faction: "robots" };
+      expect(shortestPath(game, { x: 5, y: 5 }, tile, 1)).toEqual([{ x: 6, y: 5 }]);
+      expect(shortestPath(game, { x: 5, y: 4 }, tile, 1)).toBeNull();
+      expect(shortestPath(game, tile, { x: 6, y: 6 }, 1)).toBeNull();
+      expect(shortestPath(game, tile, { x: 7, y: 5 }, 1)).toEqual([{ x: 7, y: 5 }]);
+  });
+
+  it("allows three land steps around water including diagonal steps", () => {
     const game = createGame("diagonal-path", 16, "lorgoshki");
     game.tiles = game.tiles.map((tile) => ({ ...tile, terrain: "plain" }));
-    expect(shortestPath(game, { x: 2, y: 2 }, { x: 3, y: 3 }, 1)).toEqual([{ x: 3, y: 3 }]);
+    const courier = game.units[0];
+    Object.assign(courier, { kind: "courier", x: 2, y: 2 });
     game.tiles[2 * game.size + 3].terrain = "water";
-    expect(shortestPath(game, { x: 2, y: 2 }, { x: 3, y: 3 }, 1)).toBeNull();
+    game.tiles.forEach((tile) => { tile.explored = true; });
+    const path = shortestPath(game, courier, { x: 5, y: 4 }, 3);
+    expect(path).toHaveLength(3);
+    expect(path?.every((step) => game.tiles[step.y * game.size + step.x].terrain !== "water")).toBe(true);
+    expect(canMoveTo(game, courier, { x: 5, y: 4 })).toBe(true);
+    expect(canMoveTo(game, courier, { x: 3, y: 2 })).toBe(false);
+    expect(canMoveTo(game, courier, { x: 6, y: 4 })).toBe(false);
   });
 
   it("keeps explored fog and only reveals the player's units", () => {
@@ -293,6 +429,7 @@ describe("game rules", () => {
     unit.x = 0;
     unit.y = 0;
     game.units = [unit];
+    game.bases = [];
     game.tiles.forEach((tile) => { tile.explored = false; });
 
     revealAround(game);

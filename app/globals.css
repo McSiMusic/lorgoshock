@@ -482,7 +482,10 @@ kbd { padding: 3px 6px; border: 1px solid #464a3d; color: #c9b57a; font: inherit
 .game-popup .technology-list { padding-top: 8px; }
 .game-popup .technology-row { min-height: 65px; gap: 12px; }
 .game-popup .technology-copy strong { font-size: 12px; }
-.game-popup .technology-copy small { font-size: 9px; }
+.game-popup .technology-copy small { font-size: 9px; white-space: normal; overflow: visible; line-height: 1.5; }
+.game-log { margin: 0; padding: 8px 0 0; list-style: none; }
+.game-log li { padding: 9px 0; border-bottom: 1px solid #ffffff17; color: #d7d4ee; font: 10px var(--mono); line-height: 1.5; }
+.ai-playback-block { position: fixed; inset: 0; z-index: 20; cursor: wait; }
 .game-popup .tech-button { min-width: 85px; min-height: 31px; font-size: 8px; }
 .action-bar { min-height: 65px; margin-top: 10px; padding: 8px 10px; display: flex; align-items: center; gap: 9px; border: 1px solid #46466e; background: #1b1d35; }
 .selection-summary { min-width: 160px; flex: 1; display: flex; align-items: center; gap: 9px; }
@@ -735,8 +738,12 @@ html, body { width: 100%; height: 100%; overflow: hidden; overscroll-behavior: n
 }
 .context-option span { font-size: 20px; }
 .context-option img { width: 30px; height: 30px; object-fit: contain; }
+.context-option .resource-icon { position: relative; display: block; width: 44px; height: 36px; }
+.context-option .resource-icon img { width: 36px; height: 36px; }
+.context-option .resource-price { position: absolute; right: -3px; top: -3px; padding: 1px 3px; background: #16182d; color: #ffda7c; font: bold 10px var(--mono); }
 .context-option small { color: #ffda7c; }
 .context-option:disabled { opacity: .4; cursor: not-allowed; }
+.action-bar .action-button:disabled { opacity: .45; cursor: not-allowed; }
 
 .resume-button { margin-top: 8px; background: #373657; color: #fff3cc; }
 .save-warning {
@@ -924,4 +931,43 @@ html, body { width: 100%; height: 100%; overflow: hidden; overscroll-behavior: n
 
 @media (max-width: 500px) and (max-height: 500px) {
   .hero-copy { display: none; }
+}
+
+.technology-tree { display: grid; gap: 12px; padding-top: 15px; }
+.technology-branch { --tech-accent: #ffd486; padding: 14px; border: 1px solid #555479; background: linear-gradient(135deg, #303252, #20223d); }
+.technology-branch-1 { --tech-accent: #8fe6dc; }
+.technology-branch-2 { --tech-accent: #f5abc7; }
+.technology-branch h3 { margin: 0 0 10px; color: #f6f1ff; font: 600 14px var(--display); }
+.technology-controls { display: flex; align-items: center; gap: 16px; }
+.technology-levels { display: flex; flex: 1; align-items: center; gap: 16px; }
+.technology-orb { position: relative; width: 52px; height: 52px; flex: 0 0 auto; display: grid; place-items: center; padding: 9px; border: 2px solid #747190; border-radius: 50%; background: #373955; color: #afb1c4; cursor: pointer; transition: border-color .15s, background .15s, box-shadow .15s; }
+.technology-orb::after { position: absolute; left: calc(100% + 3px); width: 12px; height: 2px; background: #68677b; content: ""; }
+.technology-orb:last-child::after { display: none; }
+.technology-orb svg { width: 100%; height: 100%; }
+.technology-orb.is-active { border-color: var(--tech-accent); background: #44445c; color: var(--tech-accent); }
+.technology-orb.is-muted { border-color: #67687a; background: #292b40; color: #a6a8b8; }
+.technology-orb.is-selected { box-shadow: 0 0 0 3px #ffffff38, 0 0 16px #ffffff18; }
+.technology-orb:hover, .technology-orb:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.technology-orb-number { position: absolute; right: -3px; bottom: -3px; min-width: 18px; height: 18px; display: grid; place-items: center; border: 1px solid #77758d; border-radius: 50%; background: #22243a; color: #f5f0ff; font: bold 10px var(--mono); }
+.technology-orb.is-done .technology-orb-number { background: #4a704f; border-color: #9adeaa; color: #fff; }
+.technology-research-control { display: grid; justify-items: center; gap: 4px; }
+.technology-research-control small { color: #c7c0cc; font: 9px var(--sans); text-align: center; }
+.game-popup .technology-research { min-width: 116px; min-height: 42px; padding: 6px 10px; border-color: #d3ac69; background: #dca957; color: #261b14; font-size: 9px; font-weight: bold; }
+.technology-research span { display: block; margin-top: 3px; }
+.game-popup .technology-research:disabled { border-color: #696678; background: #343443; color: #c3bdc4; }
+.technology-description { margin-top: 12px; padding: 11px 12px; border-left: 2px solid var(--tech-accent); background: #17192dcc; }
+.technology-description-heading { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 5px 12px; }
+.technology-description-heading strong { color: #f5efff; font: 600 12px var(--sans); }
+.technology-description-heading span { color: var(--tech-accent); font: 10px var(--mono); }
+.technology-description p { margin: 7px 0 0; color: #d1d0df; font: 12px var(--sans); line-height: 1.5; }
+.technology-description small { display: block; margin-top: 8px; color: #a8adbf; font: 10px var(--sans); line-height: 1.4; }
+
+@media (max-width: 500px) {
+  .technology-branch { padding: 10px; }
+  .technology-controls { gap: 8px; }
+  .technology-levels { gap: 8px; }
+  .technology-orb { width: 43px; height: 43px; padding: 7px; }
+  .technology-orb::after { left: calc(100% + 2px); width: 4px; }
+  .game-popup .technology-research { min-width: 84px; padding: 5px; font-size: 8px; }
+  .technology-description-heading strong, .technology-description p { font-size: 11px; }
 }

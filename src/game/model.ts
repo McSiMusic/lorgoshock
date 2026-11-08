@@ -26,6 +26,7 @@ export type Unit = Identity & {
   moved: boolean;
   attacked: boolean;
   coffeeBoostTurn?: number;
+  coffeeMovementBoost?: boolean;
 };
 
 export type CombatEvent = {
@@ -33,6 +34,8 @@ export type CombatEvent = {
   attacker: Unit;
   defender: Unit;
   counterattack: boolean;
+  lethal: boolean;
+  advance: boolean;
 };
 
 export type Tile = {
@@ -45,10 +48,22 @@ export type Tile = {
   explored: boolean;
   visible: boolean;
   harvestedBy?: Faction;
+  bridge?: { axis: "x" | "y"; faction: Faction };
 };
 
 export type ResourceEvent = { id: number; x: number; y: number; baseId: string; cost: number; progress: number };
+export type PendingProgress = ResourceEvent & { faction: Faction };
 export type IncomeEvent = { id: number; x: number; y: number; amount: number };
+export type MovementEvent = { id: number; unitId: string; from: { x: number; y: number }; to: { x: number; y: number }; path: Array<{ x: number; y: number }> };
+export type BotAction = {
+  position: { x: number; y: number };
+  before: GameState;
+  after: GameState;
+  combatEvents: CombatEvent[];
+  resourceEvents: ResourceEvent[];
+  movementEvents: MovementEvent[];
+  events: GameEvent[];
+};
 export type PoiVisit = { x: number; y: number; unitId: string; readyTurn: number };
 
 export type GameState = {
@@ -67,6 +82,7 @@ export type GameState = {
   nextEventId: number;
   coffeeBreaks: PoiVisit[];
   coinVisits: PoiVisit[];
+  pendingProgress?: PendingProgress[];
   status: "running" | "won" | "lost";
 };
 
@@ -109,12 +125,15 @@ export type GameCommand =
   | { type: "RESUME"; state: GameState }
   | { type: "MOVE"; x: number; y: number; unitId: string }
   | { type: "ATTACK"; x: number; y: number; unitId: string }
+  | { type: "HEAL"; unitId: string }
   | { type: "CAPTURE"; baseId: string; unitId: string }
   | { type: "HARVEST"; x: number; y: number; baseId: string; reward?: "progress" | "tokens" }
+  | { type: "BUILD_BRIDGE"; x: number; y: number; baseId: string }
+  | { type: "RESOURCE_ARRIVED"; id: number }
   | { type: "HIRE"; baseId: string; kind: UnitKind }
   | { type: "EXPAND_HARVEST_RANGE"; baseId: string }
   | { type: "RESEARCH"; branch: number }
-  | { type: "COFFEE"; unitId: string; reward: "tokens" | "confidence" | "movement" }
+  | { type: "COFFEE"; unitId: string; reward: "tokens" | "vision" | "movement" }
   | { type: "COLLECT_COINS"; unitId: string }
   | { type: "END_TURN" };
 import type { Identity, LocalizedName } from "./names";
