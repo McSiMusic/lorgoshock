@@ -136,7 +136,7 @@ function drawTile(
   root.addChild(block);
   if (unexplored) return;
 
-  if (tile.terrain === "water" && game.playerFaction === "robots") {
+  if (tile.terrain === "water" && tile.harvestedBy === "robots") {
     drawDriedLake(root, x, y, width, height, variant);
   } else {
     const terrainSprite = new Sprite(getTerrainTexture(art, tile.terrain, variant));
@@ -754,8 +754,8 @@ function drawLatest(
     const { x, y } = tileCenter(grid, base.x, base.y);
     const count = cityCapacity(base);
     const occupied = cityOccupancy(game, base);
-    const cell = Math.max(3, Math.min(10, grid.tileWidth * 0.4) / zoom);
-    const gap = Math.max(1, Math.min(3, grid.tileWidth * 0.08) / zoom);
+    const cell = Math.max(6, Math.min(20, grid.tileWidth * 0.8) / zoom);
+    const gap = Math.max(2, Math.min(6, grid.tileWidth * 0.16) / zoom);
     const top = y - art[kind].height * layout.scale * layout.anchorY - cell * 1.3;
     const bar = new Graphics();
     const progress = base.rank >= 4 ? count : base.progress;

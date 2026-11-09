@@ -10,9 +10,10 @@ import { unitPortraitPath } from "../game/unitArt";
 import { makeStore, resetState, setError, syncState, type AppDispatch, type RootState } from "../state/store";
 import MapView from "./MapView";
 import TechnologyTree from "./TechnologyTree";
+import RulesContent from "./RulesContent";
 
 type Language = "en" | "ru";
-type Panel = "tech" | "log" | null;
+type Panel = "tech" | "log" | "rules" | null;
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
@@ -20,7 +21,7 @@ type BeforeInstallPromptEvent = Event & {
 
 const TEXT: Record<Language, Record<string, string>> = {
   en: {
-    tagline: "A bright, independent strategy · 2026", offline: "NO SERVER REQUIRED", strategy: "A BRIGHT 4X STRATEGY",
+    offline: "NO SERVER REQUIRED", strategy: "A BRIGHT 4X STRATEGY",
     intro: "Build your company, explore a vivid world, gather resources, and meet the rival robots.", newGame: "NEW GAME",
     chooseFaction: "Choose your team", lorgoshki: "Lorgoshki", robots: "Robots", mapSize: "MAP SIZE",
     quick: "Quick", career: "Career", large: "Large", start: "START GAME", local: "World and rival are generated locally.",
@@ -44,6 +45,10 @@ const TEXT: Record<Language, Record<string, string>> = {
     cityOccupied: "Move the unit out before training.",
     progress: "company progress", resourceTokens: "tokens",
     acceptOffer: "ACCEPT OFFER", layoff: "LAYOFF",
+    negotiations: "NEGOTIATIONS IN PROGRESS", negotiationsHint: "Stay on this company until your next turn. Then select this unit to finish the takeover.",
+    captureReady: "OFFER READY — TAKE OVER NOW", captureReadyHint: "The takeover is ready. Select this unit and use the highlighted action.",
+    captureActionSpent: "OFFER READY — UNIT ACTION SPENT", captureActionSpentHint: "This unit already moved or attacked. Finish the takeover next turn.",
+    rules: "RULES", rulesTitle: "HOW TO PLAY", rulesSubtitle: "A field guide to Lorgoshock", rulesHint: "Open the game rules",
     forest: "Forest", geese: "Geese", mountain: "Mountain", water: "Water",
     forestHuman: "Turn trees into office decor and potted ficuses.", forestRobot: "Turn trees into pulp for 500-page NDAs.",
     geeseHuman: "Domesticate the goose for the team.", geeseRobot: "Cybernetically upgrade the goose into a robogoose.",
@@ -55,7 +60,7 @@ const TEXT: Record<Language, Record<string, string>> = {
     builtBridge: "Bridge built.",
     resourceProgress: "PROGRESS", resourceAlternative: "TOKENS INSTEAD",
     aiFallback: "Unable to complete that action. Check the unit's range, terrain, and token cost.",
-    playerCount: "COMPANIES", army: "UNITS", income: "INCOME", objective: "CONTROL THE MAP",
+    playerCount: "COMPANIES", army: "UNITS", income: "INCOME",
     welcomeTitle: "Your mission, should HR approve", welcomeText: "Explore, collect resources and grow your companies. Capture the rival's last company to win. Keep your team alive: even robots dislike surprise layoffs.",
     startupTitle: "UNCLAIMED STARTUP", startupDetail: "An independent garage startup. Move a unit here, survive until the next turn, then accept the offer or perform a layoff to take it over.",
     enemyCompany: "RIVAL COMPANY", enemyCompanyDetail: "The rival owns this company. Defeat any defender, then hold it until the next turn to take it over.",
@@ -64,7 +69,7 @@ const TEXT: Record<Language, Record<string, string>> = {
     attackStat: "ATK", rangeStat: "RANGE", droneDetail: "Fast drone: weak ranged attack (2 tiles).",
   },
   ru: {
-    tagline: "Яркая независимая стратегия · 2026", offline: "СЕРВЕР НЕ НУЖЕН", strategy: "ЯРКАЯ СТРАТЕГИЯ 4X",
+    offline: "СЕРВЕР НЕ НУЖЕН", strategy: "ЯРКАЯ СТРАТЕГИЯ 4X",
     intro: "Развивай компанию, исследуй красочный мир, собирай ресурсы и встречай роботов-соперников.", newGame: "НОВАЯ ИГРА",
     chooseFaction: "Выбери команду", lorgoshki: "Лоргошки", robots: "Роботы", mapSize: "РАЗМЕР КАРТЫ",
     quick: "Быстрая", career: "Карьера", large: "Большая", start: "НАЧАТЬ ИГРУ", local: "Мир и соперник создаются локально.",
@@ -88,6 +93,10 @@ const TEXT: Record<Language, Record<string, string>> = {
     cityOccupied: "Выведи юнита из компании перед тренировкой.",
     progress: "прогресса компании", resourceTokens: "токенов",
     acceptOffer: "ПРИНЯТЬ ОФФЕР", layoff: "СОКРАЩЕНИЕ",
+    negotiations: "ИДУТ ПЕРЕГОВОРЫ", negotiationsHint: "Останься в этой компании до следующего хода. Затем выбери юнита и заверши захват.",
+    captureReady: "ОФФЕР ГОТОВ — ЗАХВАТИТЬ", captureReadyHint: "Захват готов. Выбери этого юнита и нажми на яркую кнопку.",
+    captureActionSpent: "ОФФЕР ГОТОВ — ЮНИТ УЖЕ ДЕЙСТВОВАЛ", captureActionSpentHint: "Юнит уже переместился или атаковал. Заверши захват в следующем ходу.",
+    rules: "ПРАВИЛА", rulesTitle: "КАК ИГРАТЬ", rulesSubtitle: "Путеводитель по Lorgoshock", rulesHint: "Открыть правила игры",
     forest: "Лес", geese: "Гуси", mountain: "Горы", water: "Вода",
     forestHuman: "Вырубить деревья для дизайна офиса и фикусов.", forestRobot: "Переработать деревья в целлюлозу для 500-страничных NDA.",
     geeseHuman: "Одомашнить гуся для команды.", geeseRobot: "Кибернетизировать гуся и превратить его в робогуся.",
@@ -99,7 +108,7 @@ const TEXT: Record<Language, Record<string, string>> = {
     builtBridge: "Мост построен.",
     resourceProgress: "ПРОГРЕСС", resourceAlternative: "ВМЕСТО ПРОГРЕССА",
     aiFallback: "Не удалось выполнить действие. Проверь дальность, тип местности и стоимость в токенах.",
-    playerCount: "КОМПАНИИ", army: "ЮНИТЫ", income: "ДОХОД", objective: "КОНТРОЛИРУЙ КАРТУ",
+    playerCount: "КОМПАНИИ", army: "ЮНИТЫ", income: "ДОХОД",
     welcomeTitle: "Твоя миссия, если HR одобрит", welcomeText: "Исследуй мир, собирай ресурсы и развивай компании. Захвати последнюю компанию соперника, чтобы победить. Береги команду: даже роботы не любят внезапные сокращения.",
     startupTitle: "СВОБОДНЫЙ СТАРТАП", startupDetail: "Независимый стартап в гараже. Поставь сюда юнита, продержись до следующего хода и прими оффер или проведи сокращение, чтобы захватить компанию.",
     enemyCompany: "КОМПАНИЯ СОПЕРНИКА", enemyCompanyDetail: "Эта компания принадлежит сопернику. Победи защитника и удерживай компанию до следующего хода, чтобы её захватить.",
@@ -110,8 +119,8 @@ const TEXT: Record<Language, Record<string, string>> = {
 };
 
 const UNIT_ART: Record<UnitKind, string> = {
-  junior: "hipster-man", courier: "courier-scooter-woman", middle: "hipster-woman-alt", senior: "senior-hipster",
-  workerBot: "robot-worker", drone: "robot-drone", vacuum: "robot-vacuum",
+  junior: "mobile-hipster-woman", courier: "mobile-courier-woman", middle: "mobile-hipster-alt", senior: "mobile-senior-hipster",
+  workerBot: "mobile-robot-worker", drone: "mobile-robot-drone", vacuum: "mobile-robot-vacuum",
 };
 
 const UNIT_NAMES: Record<Language, Partial<Record<UnitKind, string>>> = {
@@ -481,8 +490,12 @@ function GameApp() {
   const cityOccupied = Boolean(resourceCity && units.some((unit) => unit.x === resourceCity.x && unit.y === resourceCity.y));
   const resourceTile = selectedResource ? game?.tiles[selectedResource.y * game.size + selectedResource.x] : undefined;
   const resourceBase = selectedResource && game ? game.bases.find((base) => base.id === selectedResource.baseId) : undefined;
-  const selectedCapture = selectedUnit && game?.bases.find((base) => base.capture?.unitId === selectedUnit.id
-    && base.capture.faction === game.playerFaction && base.capture.readyTurn <= game.turn);
+  const selectedCaptureBase = selectedUnit && game?.bases.find((base) => base.capture?.unitId === selectedUnit.id
+    && base.capture.faction === game.playerFaction);
+  const selectedCapture = selectedCaptureBase
+    && (selectedCaptureBase.capture?.readyTurn ?? Number.POSITIVE_INFINITY) <= (game?.turn ?? -1)
+    ? selectedCaptureBase
+    : undefined;
   const coffeeUnit = units.find((unit) => unit.id === (selectedCoffeeId ?? selectedId) && unit.faction === game?.playerFaction);
   const selectedCoffee = game?.coffeeBreaks.find((coffee) => coffee.unitId === coffeeUnit?.id
     && coffee.readyTurn <= game.turn && coffeeUnit.x === coffee.x && coffeeUnit.y === coffee.y);
@@ -596,7 +609,10 @@ function GameApp() {
       <main className="landing">
         <div className="landing-grid" />
         <header className="topline">
-          <span className="brand-mark">LS</span><span>{text.tagline}</span>
+          <div className="topline-brand">
+            <img className="brand-mark" src="./icon-512.png" alt="" />
+            <a className="rules-link" href="./rules/"><span aria-hidden="true">?</span>{text.rules}</a>
+          </div>
           <div className="landing-controls"><span className="online"><i /> {text.offline}</span><LanguageSwitch language={language} setLanguage={setLanguage} /></div>
         </header>
         <section className="hero">
@@ -649,6 +665,7 @@ function GameApp() {
   return (
     <main className="game-screen">
       <header className="game-header">
+        <div className="game-brand"><img className="brand-mark" src="./icon-512.png" alt="" /><span>Lorgoshock</span></div>
         <div className="turn-indicator"><i /> {text.turn} {game.turn} <span>·</span> {replaying ? text.opponentTurn : text.yourTurn}</div>
         <div className="header-right">
           <div className="wallet"><span>◈</span> {displayedTokens}T <small>(+{income} {text.tokens})</small></div>
@@ -706,8 +723,14 @@ function GameApp() {
               onClick={() => { send({ type: "BUILD_BRIDGE", baseId: bridgeBase.id, x: describedTile.x, y: describedTile.y }); setSelectedResource(null); }}><span>◇</span><strong>{text.bridge}</strong><small>5 T</small></button>}
             </div>
           </div>}
-          {selectedCapture && selectedUnit && <div className="context-actions" aria-label={game.playerFaction === "robots" ? text.layoff : text.acceptOffer}>
-            <div className="context-options"><button type="button" className={`context-option capture-action${game.playerFaction === "robots" ? " robot-action" : ""}`}
+          {selectedCaptureBase && selectedUnit && !selectedCapture && <div className="context-actions capture-status" role="status">
+            <div className="context-title">{text.negotiations} · {Math.max(1, (selectedCaptureBase.capture?.readyTurn ?? game.turn + 1) - game.turn)} {text.turn.toLowerCase()}</div>
+            <p>{text.negotiationsHint}</p>
+          </div>}
+          {selectedCapture && selectedUnit && <div className="context-actions capture-status capture-status-ready" role="status">
+            <div className="context-title">{selectedUnit.moved || selectedUnit.attacked ? text.captureActionSpent : text.captureReady}</div>
+            <p>{selectedUnit.moved || selectedUnit.attacked ? text.captureActionSpentHint : text.captureReadyHint}</p>
+            <div className="context-options"><button type="button" className={`context-option capture-action${selectedUnit.moved || selectedUnit.attacked ? "" : " ready"}${game.playerFaction === "robots" ? " robot-action" : ""}`}
               disabled={selectedUnit.moved || selectedUnit.attacked}
               onClick={() => send({ type: "CAPTURE", baseId: selectedCapture.id, unitId: selectedUnit.id })}>
               <span className="capture-action-icon" aria-hidden="true">{game.playerFaction === "robots" ? "−" : "✓"}</span>
@@ -732,7 +755,9 @@ function GameApp() {
           {selectedUnit?.kind === "drone" && !selectedCapture && !selectedCoffee && !selectedCoins && <div className="context-actions" aria-label={unitName("drone")}><div className="context-title">{selectedUnit.name[language]} · {text.droneDetail} · {text.attackStat} {UNIT_DEFINITIONS.drone.attack} · {text.rangeStat} {attackRange(game, selectedUnit)}</div></div>}
           {!selectedUnit && !resourceCity && !selectedResource && inspectedTile && (inspectedTile.explored || revealMap) && (inspectedBase || (inspectedTile.poi && !inspectedTile.poiClaimed) || inspectedEnemy) && <div className="context-actions" aria-label={inspectedBase ? (inspectedBase.owner ? text.enemyCompany : text.startupTitle) : inspectedEnemy ? text.opponent : inspectedTile.poi === "treasury" ? text.treasureTitle : text.coffeeTitle}>
             {inspectedEnemy && <div className="context-title">{inspectedEnemy.name[language]} · {unitName(inspectedEnemy.kind)} · {inspectedEnemy.hp}/{UNIT_DEFINITIONS[inspectedEnemy.kind].maxHp} HP</div>}
-            {inspectedBase && <><div className="context-title">{inspectedBase.name[language]} · {inspectedBase.owner ? text.enemyCompany : text.startupTitle}</div><div className="context-title">{inspectedBase.owner ? text.enemyCompanyDetail : text.startupDetail}</div></>}
+            {inspectedBase && <><div className="context-title">{inspectedBase.name[language]} · {inspectedBase.owner ? text.enemyCompany : text.startupTitle}</div>
+              <div className="context-title">{inspectedBase.owner ? text.enemyCompanyDetail : text.startupDetail}</div>
+              {inspectedBase.capture && <div className="capture-inspection">{inspectedBase.capture.readyTurn <= game.turn ? text.captureReadyHint : text.negotiationsHint}</div>}</>}
             {!inspectedBase && inspectedTile.poi && !inspectedTile.poiClaimed && <><div className="context-title">{inspectedTile.poi === "treasury" ? text.treasureTitle : text.coffeeTitle}</div><div className="context-title">{inspectedTile.poi === "treasury" ? text.treasureDetail : text.coffeeDetail}</div></>}
           </div>}
           <div className="action-bar">
@@ -745,6 +770,7 @@ function GameApp() {
               onClick={() => send({ type: "HEAL", unitId: selectedUnit.id })}>♡ {text.heal} · +{healingAmount(game, selectedUnit)} HP</button>}
             <button type="button" className="action-button" onClick={() => setPanel("tech")}>◎ {text.openTech}</button>
             <button type="button" className="action-button" onClick={() => setPanel("log")}>☰ {text.openLog}</button>
+            <button type="button" className="action-button rules-game-button" onClick={() => setPanel("rules")} aria-label={text.rulesHint}>? <span className="rules-game-label">{text.rules}</span></button>
             <button type="button" className="end-turn-button" disabled={game.status !== "running" || Boolean(game.pendingProgress?.length)} onClick={() => send({ type: "END_TURN" })}>
               <span className="end-turn-label">{text.endTurn}</span><span className="end-turn-arrow" aria-hidden="true">→</span>
             </button>
@@ -763,11 +789,17 @@ function GameApp() {
           {game.logs.length ? <ol className="game-log">{game.logs.map((event) => <li key={event.id}>{event[language]}</li>)}</ol> : <p className="popup-hint">{text.emptyLog}</p>}
         </section>
       </div>}
+      {panel === "rules" && <div className="panel-backdrop" onClick={() => setPanel(null)}>
+        <section className="game-popup rules-popup" role="dialog" aria-modal="true" aria-labelledby="rules-title" onClick={(event) => event.stopPropagation()}>
+          <div className="popup-header"><div><h2 id="rules-title">{text.rulesTitle}</h2><span>{text.rulesSubtitle}</span></div><button type="button" onClick={() => setPanel(null)} aria-label={text.close}>×</button></div>
+          <RulesContent language={language} onClose={() => setPanel(null)} />
+        </section>
+      </div>}
       {welcome && game.status === "running" && <div className="modal-backdrop"><section className="result-modal" role="dialog" aria-modal="true" aria-labelledby="welcome-title"><h2 id="welcome-title">{text.welcomeTitle}</h2><p>{text.welcomeText}</p><button className="launch-button" type="button" onClick={() => setWelcome(false)}>{text.close} <span>↗</span></button></section></div>}
       {game.status !== "running" && !resultPending && <div className="modal-backdrop"><section className="result-modal" role="dialog" aria-modal="true" aria-labelledby="result-title"><div className="coffee-cup">{game.status === "won" ? "🏆" : "🤖"}</div><div className="eyebrow">{game.status === "won" ? text.statusWin : text.statusLost}</div><h2 id="result-title">{game.status === "won" ? text.won : text.lost}</h2><button className="launch-button" type="button" onClick={clearGame}>{text.next} <span>↗</span></button></section></div>}
       {error && <div className="error-toast" role="alert">{error}<button type="button" onClick={() => dispatch(setError(null))}>✕</button></div>}
       {replaying && <div className="ai-playback-block" role="status" aria-label={text.opponentTurn} />}
-      <footer className="game-footer"><span>{text.objective}</span><span>{neutralBases} {text.neutralCity.toUpperCase()} · {enemyBases} {text.opponent}</span></footer>
+      <footer className="game-footer"><span>{neutralBases} {text.neutralCity.toUpperCase()} · {enemyBases} {text.opponent}</span></footer>
     </main>
   );
 }
