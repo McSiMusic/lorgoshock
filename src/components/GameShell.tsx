@@ -5,7 +5,7 @@ import { Provider, useDispatch, useSelector } from "react-redux";
 import { DEFAULT_MAP_SIZE, MAP_SIZES, UNIT_BY_TIER, UNIT_DEFINITIONS, type BotAction, type CombatEvent, type Faction, type GameCommand, type GameEvent, type GameState, type IncomeEvent, type MovementEvent, type ResourceEvent, type UnitKind } from "../game/model";
 import { COMBAT_DURATION, RESOURCE_DURATION, TRANSFORMATION_DURATION } from "../game/animation";
 import { SAVE_KEY, savedGameSchema } from "../game/save";
-import { attackRange, bridgeAxis, canAttack, canHarvest, canHarvestWithinCity, canMoveTo, cityCapacity, cityOccupancy, effectiveAttack, hasUnitAction, healingAmount, hireCost, incomeForRank, progressToNextRank, resourceCity as findResourceCity, resourceCost, resourceProgress } from "../game/rules";
+import { attackRange, bridgeAxis, canAttack, canHarvest, canMoveTo, cityCapacity, cityOccupancy, effectiveAttack, hasUnitAction, healingAmount, hireCost, incomeForRank, progressToNextRank, resourceCity as findResourceCity, resourceCost, resourceProgress } from "../game/rules";
 import { unitPortraitPath } from "../game/unitArt";
 import { makeStore, resetState, setError, syncState, type AppDispatch, type RootState } from "../state/store";
 import MapView from "./MapView";
@@ -21,7 +21,7 @@ type BeforeInstallPromptEvent = Event & {
 
 const TEXT: Record<Language, Record<string, string>> = {
   en: {
-    offline: "NO SERVER REQUIRED", strategy: "A BRIGHT 4X STRATEGY",
+    strategy: "A BRIGHT 4X STRATEGY",
     intro: "Build your company, explore a vivid world, gather resources, and meet the rival robots.", newGame: "NEW GAME",
     chooseFaction: "Choose your team", lorgoshki: "Lorgoshki", robots: "Robots", mapSize: "MAP SIZE",
     quick: "Quick", career: "Career", large: "Large", start: "START GAME", local: "World and rival are generated locally.",
@@ -38,7 +38,7 @@ const TEXT: Record<Language, Record<string, string>> = {
     resource: "GATHER RESOURCE", moveHere: "MOVE HERE", coffee: "Coffee break", coffeeText: "Choosing a bonus ends this unit's turn.",
     bonus: "TOKEN BONUS", heal: "HEAL", balcony: "CLIMB TO BALCONY", wifi: "CONNECT TO WI-FI", scouting: "Reveal radius 4", speed: "PERMANENT SPEED", collectCoins: "COLLECT BLET-COINS", robotCoffee: "Thermal latte: choosing a bonus ends this unit's turn.", next: "NEW GAME", won: "The rival has no companies left.",
     lost: "You have no companies left. Try a new strategy.", statusWin: "VICTORY", statusLost: "SESSION ENDED",
-    cityHint: "Training happens here. Select a highlighted resource to gather it.", expandedMessage: "This company's resource area now covers 5×5 tiles.",
+    cityHint: "Training happens here. Select a highlighted resource to gather it.", expandedMessage: "This company claimed available tiles within 5×5.",
     cityFull: "Company capacity is full.", selectGarrison: "SELECT A UNIT",
     cityContested: "Company is being captured. Training and resource gathering are unavailable.",
     cityResources: "Click a resource inside the company border to gather it.",
@@ -69,7 +69,7 @@ const TEXT: Record<Language, Record<string, string>> = {
     attackStat: "ATK", rangeStat: "RANGE", droneDetail: "Fast drone: weak ranged attack (2 tiles).",
   },
   ru: {
-    offline: "СЕРВЕР НЕ НУЖЕН", strategy: "ЯРКАЯ СТРАТЕГИЯ 4X",
+    strategy: "ЯРКАЯ СТРАТЕГИЯ 4X",
     intro: "Развивай компанию, исследуй красочный мир, собирай ресурсы и встречай роботов-соперников.", newGame: "НОВАЯ ИГРА",
     chooseFaction: "Выбери команду", lorgoshki: "Лоргошки", robots: "Роботы", mapSize: "РАЗМЕР КАРТЫ",
     quick: "Быстрая", career: "Карьера", large: "Большая", start: "НАЧАТЬ ИГРУ", local: "Мир и соперник создаются локально.",
@@ -86,7 +86,7 @@ const TEXT: Record<Language, Record<string, string>> = {
     resource: "СОБРАТЬ РЕСУРС", moveHere: "ПЕРЕЙТИ СЮДА", coffee: "Кофе-брейк", coffeeText: "Выбор бонуса завершает ход этого юнита.",
     bonus: "БОНУС ТОКЕНОВ", heal: "ЛЕЧЕНИЕ", balcony: "ПОДНЯТЬСЯ НА БАЛКОН", wifi: "ПОДКЛЮЧИТЬСЯ К WI-FI", scouting: "Открыть радиус 4", speed: "СКОРОСТЬ НАВСЕГДА", collectCoins: "СОБРАТЬ BLET-КОИНЫ", robotCoffee: "Термолатте: выбор бонуса завершает ход этого юнита.", next: "НОВАЯ ИГРА", won: "У соперника не осталось компаний.",
     lost: "У тебя не осталось компаний. Попробуй другую стратегию.", statusWin: "ПОБЕДА", statusLost: "ИГРА ЗАВЕРШЕНА",
-    cityHint: "Тренировка проходит здесь. Выбери подсвеченный ресурс, чтобы собрать его.", expandedMessage: "Область ресурсов компании теперь охватывает 5×5 клеток.",
+    cityHint: "Тренировка проходит здесь. Выбери подсвеченный ресурс, чтобы собрать его.", expandedMessage: "Компания заняла доступные клетки в области 5×5.",
     cityFull: "Вместимость компании исчерпана.", selectGarrison: "ВЫБРАТЬ ЮНИТА",
     cityContested: "Компанию захватывают. Обучение и сбор ресурсов недоступны.",
     cityResources: "Нажми на ресурс в пределах компании, чтобы собрать его.",
@@ -613,14 +613,14 @@ function GameApp() {
             <img className="brand-mark" src="./icon-512.png" alt="" />
             <a className="rules-link" href="./rules/"><span aria-hidden="true">?</span>{text.rules}</a>
           </div>
-          <div className="landing-controls"><span className="online"><i /> {text.offline}</span><LanguageSwitch language={language} setLanguage={setLanguage} /></div>
+          <div className="landing-controls"><LanguageSwitch language={language} setLanguage={setLanguage} /></div>
         </header>
         <section className="hero">
           <div className="hero-copy">
             <div className="eyebrow"><span className="eyebrow-line" /> {text.strategy}</div>
             <h1>Lorgoshock<span>:</span><br /><em>Open to Work</em></h1>
             <p className="intro">{text.intro}</p>
-            <div className="hero-stats"><span><strong>4X</strong> explore and expand</span><span><strong>24×24</strong> maximum map</span><span><strong>0</strong> server required</span></div>
+            <div className="hero-stats"><span><strong>4X</strong> explore and expand</span><span><strong>24×24</strong> maximum map</span></div>
           </div>
           <div className="setup-column">
             <div className="setup-card">
@@ -683,7 +683,7 @@ function GameApp() {
             <span>DEBUG · {text.revealMap}</span>
             <input type="checkbox" role="switch" checked={revealMap} onChange={(event) => setRevealMap(event.target.checked)} aria-label={text.revealMapHint} />
           </label>
-          <MapView game={game} selected={selectedUnit ? { x: selectedUnit.x, y: selectedUnit.y } : selectedPosition} selectedUnitId={selectedId} selectedCityId={resourceCity?.id ?? null} language={language} revealMap={revealMap} combatEvents={combatEvents} resourceEvents={resourceEvents} incomeEvents={incomeEvents} movementEvents={movementEvents} focusTarget={focusTarget} onFocusArrived={focusArrived} onIncomeArrived={incomeArrived} onResourceArrived={resourceArrived} onAnimationsFinished={animationsFinished} onTileClick={selectTile} onSelectCoffee={(unitId) => { setSelectedCoffeeId(unitId); setSelectedId(null); setSelectedPosition(null); setSelectedCityId(null); setSelectedResource(null); setPanel(null); }} onCapture={(baseId, unitId) => send({ type: "CAPTURE", baseId, unitId })} onCollectCoins={(unitId) => send({ type: "COLLECT_COINS", unitId })} />
+          <MapView game={game} selected={selectedUnit ? { x: selectedUnit.x, y: selectedUnit.y } : selectedPosition} selectedUnitId={selectedId} selectedCityId={resourceCity?.id ?? (!selectedUnit && inspectedBase?.owner === game.botFaction ? inspectedBase.id : null)} language={language} revealMap={revealMap} combatEvents={combatEvents} resourceEvents={resourceEvents} incomeEvents={incomeEvents} movementEvents={movementEvents} focusTarget={focusTarget} onFocusArrived={focusArrived} onIncomeArrived={incomeArrived} onResourceArrived={resourceArrived} onAnimationsFinished={animationsFinished} onTileClick={selectTile} onSelectCoffee={(unitId) => { setSelectedCoffeeId(unitId); setSelectedId(null); setSelectedPosition(null); setSelectedCityId(null); setSelectedResource(null); setPanel(null); }} onCapture={(baseId, unitId) => send({ type: "CAPTURE", baseId, unitId })} onCollectCoins={(unitId) => send({ type: "COLLECT_COINS", unitId })} />
           <div className="map-legend"><span><i className="legend-human" />{text.yourTeam}</span><span><i className="legend-enemy" />{text.rival}</span><span><i className="legend-neutral" />{text.neutral}</span><span><i className="legend-fog" />{text.fog}</span></div>
           <div className="map-tip">{text.tip}</div>
           {resourceCity && <div className="context-actions" aria-label={text.train}>

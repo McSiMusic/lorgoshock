@@ -7,7 +7,8 @@ import { createIsometricGrid, fleePosition, initialMapZoom, screenToTile, tileCe
 import { buildingKind, buildingLayout } from "../game/buildings";
 import { BOT_FOCUS_DURATION, COMBAT_DURATION, FOG_REVEAL_DURATION, INCOME_DURATION, RESOURCE_ARRIVAL, RESOURCE_DURATION, TRANSFORMATION_DURATION, advancePosition, fogRevealAlpha, incomeCoinAmount, incomeCoinCount, incomeCoinProgress, resourceStarProgress, transformationFrame } from "../game/animation";
 import { UNIT_DEFINITIONS, type Base, type CombatEvent, type GameState, type IncomeEvent, type MovementEvent, type ResourceEvent, type Terrain, type Unit } from "../game/model";
-import { canAttack, canHarvestWithinCity, canMoveTo, cityCapacity, cityOccupancy, damage, gridDistance, hasCover, hasUnitAction, resourceCity } from "../game/rules";
+import { canAttack, canMoveTo, cityCapacity, cityOccupancy, damage, gridDistance, hasCover, hasUnitAction, resourceCity } from "../game/rules";
+import { territoryEdges } from "../game/territory";
 import { UNIT_ART_FILES, unitArtKey } from "../game/unitArt";
 
 type Props = {
@@ -641,31 +642,23 @@ function drawLatest(
   root.position.set(app.screen.width / 2 + pan.x, app.screen.height / 2 + pan.y);
   root.scale.set(zoom);
   const grid = createIsometricGrid(app.screen.width, app.screen.height, game.size);
-  const city = game.bases.find((base) => base.id === selectedCityId && base.owner === game.playerFaction);
+  const city = game.bases.find((base) => base.id === selectedCityId && base.owner !== null);
   if (city) {
-    for (const tile of game.tiles) {
-      if (!canHarvestWithinCity(city, tile)) continue;
+    const outline = new Graphics();
+    for (const tile of territoryEdges(game, city)) {
       const { x, y } = tileCenter(grid, tile.x, tile.y);
-      const outline = new Graphics();
       const vertices = [
         { x, y: y - grid.tileHeight },
         { x: x + grid.tileWidth, y },
         { x, y: y + grid.tileHeight },
         { x: x - grid.tileWidth, y },
       ];
-      const neighbors = [[0, -1], [1, 0], [0, 1], [-1, 0]];
-      for (let edge = 0; edge < 4; edge++) {
-        const [dx, dy] = neighbors[edge];
-        const neighbor = { x: tile.x + dx, y: tile.y + dy };
-        if (neighbor.x >= 0 && neighbor.y >= 0 && neighbor.x < game.size && neighbor.y < game.size
-          && canHarvestWithinCity(city, neighbor)) continue;
-        const start = vertices[edge];
-        const end = vertices[(edge + 1) % 4];
-        outline.moveTo(start.x, start.y).lineTo(end.x, end.y)
-          .stroke({ color: 0xffe26e, alpha: 0.95, width: Math.max(1.5, grid.tileWidth * 0.08) });
-      }
-      root.addChild(outline);
+      const start = vertices[tile.edge];
+      const end = vertices[(tile.edge + 1) % 4];
+      outline.moveTo(start.x, start.y).lineTo(end.x, end.y)
+        .stroke({ color: city.owner === game.playerFaction ? 0xffe26e : 0xff5555, alpha: 0.95, width: Math.max(1.5, grid.tileWidth * 0.08) });
     }
+    root.addChild(outline);
   }
   const playerUnit = game.units.find((unit) => unit.id === selectedUnitId && unit.faction === game.playerFaction);
   if (selected) {

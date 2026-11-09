@@ -321,7 +321,7 @@ function expandHarvestRange(baseId: string): boolean {
   if (!game) return false;
   if (!expandResourceArea(game, baseId)) return false;
   refreshVisibility();
-  logEvent(game, "Компания расширила территорию до 5×5.", "The company expanded its territory to 5×5.");
+  logEvent(game, "Компания заняла доступные клетки в области 5×5.", "The company claimed available tiles within 5×5.");
   return true;
 }
 

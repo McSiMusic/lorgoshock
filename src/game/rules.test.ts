@@ -4,6 +4,7 @@ import { FOG_REVEAL_DURATION, fogRevealAlpha } from "./animation";
 import { MAP_SIZES, type Unit } from "./model";
 import { makeIdentity } from "./names";
 import { unitArtKey, unitPortraitPath } from "./unitArt";
+import { claimCityTerritory } from "./territory";
 import {
   canHarvestWithinCity,
   canAttack,
@@ -216,6 +217,7 @@ describe("game rules", () => {
     Object.assign(outside, { terrain: "forest", poi: null, poiClaimed: false, visible: true });
     expect(resourceCity(game, outside)).toBeUndefined();
     base.resourceRange = 5;
+    claimCityTerritory(game, base);
     expect(resourceCity(game, outside)?.id).toBe(base.id);
     tile.visible = false;
     expect(resourceCity(game, tile)).toBeUndefined();

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { UNIT_BY_TIER, UNIT_DEFINITIONS, type GameState } from "./model";
+import { claimCityTerritory } from "./territory";
 
 export const SAVE_KEY = "lorgoshock-save-v1";
 const faction = z.enum(["lorgoshki", "robots"]);
@@ -22,6 +23,7 @@ const tile = z.object({
   ...position, terrain: z.enum(["plain", "forest", "mountain", "water"]), geese: z.boolean(),
   poi: z.enum(["coffee", "treasury"]).nullable(), poiClaimed: z.boolean(), explored: z.boolean(), visible: z.boolean(),
   harvestedBy: faction.optional(),
+  territoryBaseId: z.string().min(1).optional(),
   bridge: z.object({ axis: z.enum(["x", "y"]), faction }).optional(),
 });
 const tech = z.tuple([z.number().int().min(0).max(3), z.number().int().min(0).max(3), z.number().int().min(0).max(3)]);
@@ -30,6 +32,7 @@ const tokenPair = z.object({ lorgoshki: z.number().nonnegative(), robots: z.numb
 export const savedGameSchema: z.ZodType<GameState> = z.object({
   seed: z.string(), size: z.union([z.literal(8), z.literal(16), z.literal(24), z.literal(32)]),
   playerFaction: faction, botFaction: faction, turn: z.number().int().positive(), activeFaction: faction,
+  territoryVersion: z.literal(1).optional(),
   tokens: tokenPair, tiles: z.array(tile), bases: z.array(base).min(1), units: z.array(unit),
   tech: z.object({ lorgoshki: tech, robots: tech }),
   logs: z.array(z.object({ id: z.number().int().positive(), en: z.string(), ru: z.string() })),
@@ -52,10 +55,19 @@ export const savedGameSchema: z.ZodType<GameState> = z.object({
       && entry.id < state.nextEventId && state.bases.some((base) => base.id === entry.baseId))
     && new Set((state.pendingProgress ?? []).map((entry) => entry.id)).size === (state.pendingProgress ?? []).length
     && state.tiles.every((tile) => !tile.bridge || tile.terrain === "water")
+    && (state.territoryVersion !== 1 || state.tiles.every((tile) => !tile.territoryBaseId
+      || state.bases.some((base) => base.id === tile.territoryBaseId && base.owner !== null
+        && Math.max(Math.abs(base.x - tile.x), Math.abs(base.y - tile.y)) <= Math.floor(base.resourceRange / 2))))
     && state.bases.every((base) => !base.capture || state.units.some((unit) => unit.id === base.capture?.unitId
       && unit.faction === base.capture.faction && unit.x === base.x && unit.y === base.y))
     && new Set(state.units.map((unit) => unit.id)).size === state.units.length
     && new Set(state.bases.map((base) => base.id)).size === state.bases.length
     && state.logs.every((event) => event.id < state.nextEventId);
   if (!valid) ctx.addIssue({ code: "custom", message: "Invalid saved game state" });
+}).transform((state): GameState => {
+  if (state.territoryVersion === undefined) {
+    for (const tile of state.tiles) delete tile.territoryBaseId;
+    for (const base of state.bases) if (base.owner !== null) claimCityTerritory(state, base);
+  }
+  return { ...state, territoryVersion: 1 };
 });

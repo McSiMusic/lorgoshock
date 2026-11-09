@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BotAction, CombatEvent, GameCommand, GameState, IncomeEvent, MovementEvent, ResourceEvent } from "./model";
 import { movementRange, revealAround } from "./rules";
 import { savedGameSchema } from "./save";
+import { claimCityTerritory } from "./territory";
 
 type WorkerMessage = { type: string; state?: GameState; message?: string; combatEvents?: CombatEvent[]; resourceEvents?: ResourceEvent[]; incomeEvents?: IncomeEvent[]; movementEvents?: MovementEvent[]; events?: Array<{ en: string; ru: string }>; botActions?: BotAction[] };
 
@@ -26,6 +27,11 @@ async function createWorker() {
 }
 
 afterEach(() => vi.unstubAllGlobals());
+
+function resetTerritories(game: GameState) {
+  for (const tile of game.tiles) delete tile.territoryBaseId;
+  for (const base of game.bases) if (base.owner !== null) claimCityTerritory(game, base);
+}
 
 describe("game worker commands", () => {
   it("restores a saved 8×8 map", async () => {
@@ -70,6 +76,32 @@ describe("game worker commands", () => {
     const state = worker.send({ type: "START", seed: "legacy-coins", size: 16, faction: "lorgoshki" }).state!;
     const { coinVisits: _coinVisits, ...legacy } = state;
     expect(savedGameSchema.parse(legacy).coinVisits).toEqual([]);
+  });
+
+  it("preserves first-claimed territory through capture, expansion and save restore", async () => {
+    const worker = await createWorker();
+    const game = worker.send({ type: "START", seed: "territory-commands", size: 16, faction: "lorgoshki" }).state!;
+    const [first, enemy, neutral] = game.bases;
+    Object.assign(first, { x: 5, y: 5, resourceRange: 5 });
+    Object.assign(enemy, { x: 13, y: 13 });
+    Object.assign(neutral, { x: 8, y: 5, owner: null, resourceRange: 3 });
+    game.bases = [first, enemy, neutral];
+    resetTerritories(game);
+    const unit = game.units[0];
+    Object.assign(unit, { x: neutral.x, y: neutral.y, moved: false, attacked: false });
+    neutral.capture = { unitId: unit.id, faction: game.playerFaction, readyTurn: game.turn };
+    expect(worker.send({ type: "CAPTURE", baseId: neutral.id, unitId: unit.id }).type).toBe("STATE");
+    expect(game.tiles.filter((tile) => tile.territoryBaseId === neutral.id)).toHaveLength(6);
+    expect(game.tiles[5 * game.size + 7].territoryBaseId).toBe(first.id);
+
+    game.tokens[game.playerFaction] = 10;
+    expect(worker.send({ type: "EXPAND_HARVEST_RANGE", baseId: neutral.id }).type).toBe("STATE");
+    expect(game.tiles.filter((tile) => tile.territoryBaseId === neutral.id)).toHaveLength(15);
+    expect(game.tiles[5 * game.size + 7].territoryBaseId).toBe(first.id);
+    const resumedWorker = await createWorker();
+    const restored = resumedWorker.send({ type: "RESUME", state: JSON.parse(JSON.stringify(game)) });
+    expect(restored.type).toBe("STATE");
+    expect(restored.state!.tiles.map((tile) => tile.territoryBaseId)).toEqual(game.tiles.map((tile) => tile.territoryBaseId));
   });
 
   it("announces discoveries only once and does not announce ordinary moves", async () => {
@@ -544,6 +576,7 @@ describe("game worker commands", () => {
     Object.assign(outside, { terrain: "water", poi: null, poiClaimed: false, visible: true });
     expect(worker.send({ type: "HARVEST", baseId: base.id, x: outside.x, y: outside.y }).type).toBe("ERROR");
     base.resourceRange = 5;
+    claimCityTerritory(game, base);
     game.tokens.lorgoshki = 4;
     expect(worker.send({ type: "HARVEST", baseId: base.id, x: outside.x, y: outside.y }).type).toBe("ERROR");
     expect(game.tokens.lorgoshki).toBe(4);
@@ -637,6 +670,7 @@ describe("game worker commands", () => {
     const game = worker.send({ type: "START", seed: "bridge-save", size: 16, faction }).state!;
     const base = game.bases[0];
     Object.assign(base, { x: 5, y: 5 });
+    resetTerritories(game);
     const tile = game.tiles[5 * game.size + 6];
     Object.assign(tile, { terrain: "water", poi: null, explored: true });
     for (const x of [5, 7]) game.tiles[5 * game.size + x].terrain = "plain";
@@ -993,6 +1027,7 @@ describe("game worker commands", () => {
     game.bases = game.bases.slice(0, 2);
     for (const tile of game.tiles) Object.assign(tile, { explored: false, visible: false, terrain: "plain", poi: null });
     Object.assign(game.bases[1], { x: 11, y: 11 });
+    resetTerritories(game);
     Object.assign(game.tiles[visitor.y * game.size + visitor.x], { poi: "coffee", poiClaimed: false });
     game.coffeeBreaks.push({ x: visitor.x, y: visitor.y, unitId: visitor.id, readyTurn: game.turn });
     const result = worker.send({ type: "COFFEE", unitId: visitor.id, reward: "vision" });
@@ -1017,6 +1052,7 @@ describe("game worker commands", () => {
     Object.assign(home, { x: 3, y: 3 });
     Object.assign(enemy, { x: 10, y: 10, resourceRange: 5 });
     game.bases = [home, enemy];
+    resetTerritories(game);
     Object.assign(unit, { x: 3, y: 3, hp: 1 });
     const maximum = faction === "lorgoshki" ? 5 : 8;
     const check = (x: number, y: number, expected: number) => {

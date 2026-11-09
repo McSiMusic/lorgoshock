@@ -87,9 +87,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   letter-spacing: -.08em;
 }
 
-.topline > .brand-mark { position: absolute; left: 28px; }
-.online { display: flex; align-items: center; gap: 9px; color: #a6b492; }
-.online i, .turn-indicator i {
+.turn-indicator i {
   width: 7px;
   height: 7px;
   border-radius: 50%;
@@ -538,10 +536,7 @@ kbd { padding: 3px 6px; border: 1px solid #464a3d; color: #c9b57a; font: inherit
 @media (max-width: 720px) {
   .server-cloud { animation: none; }
   .landing { padding: 18px 18px 12px; }
-  .topline { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 6px; justify-content: initial; font-size: 8px; }
-  .topline > .brand-mark { position: static; left: auto; }
-  .topline > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .online { font-size: 7px; }
+  .topline { gap: 12px; font-size: 8px; }
   .hero { min-height: unset; padding: 65px 0 42px; grid-template-columns: 1fr; gap: 35px; }
   .hero-copy { max-width: 500px; }
   .hero h1 { font-size: clamp(53px, 12vw, 74px); }
@@ -886,7 +881,6 @@ html:has(.rules-page), body:has(.rules-page) {
   .context-option img { width: 24px; height: 24px; }
   .landing { padding: 10px 12px; }
   .topline { min-height: 28px; font-size: 7px; }
-  .topline > .brand-mark { left: 12px; width: 25px; height: 25px; }
   .landing-controls { gap: 6px; }
   .hero { padding: 10px 0; gap: 12px; }
   .hero h1 { font-size: clamp(37px, 9vw, 56px); }
@@ -1030,7 +1024,7 @@ html:has(.rules-page), body:has(.rules-page) {
 
 .topline { position: relative; }
 .topline-brand { display: flex; align-items: center; gap: 12px; }
-.topline > .brand-mark { position: static; width: 36px; height: 36px; object-fit: cover; border-color: #e6b35c; }
+.topline-brand .brand-mark { width: 36px; height: 36px; object-fit: cover; border-color: #e6b35c; }
 .rules-link, .rules-back-link {
   display: inline-flex;
   align-items: center;
@@ -1224,7 +1218,7 @@ html:has(.rules-page), body:has(.rules-page) {
 
 @media (max-width: 500px) {
   .topline-brand { gap: 7px; }
-  .topline > .brand-mark { width: 29px; height: 29px; }
+  .topline-brand .brand-mark { width: 29px; height: 29px; }
   .rules-link { gap: 5px; padding: 5px 7px; font-size: 7px; }
   .rules-link > span { width: 15px; height: 15px; font-size: 10px; }
   .game-brand { display: none; }

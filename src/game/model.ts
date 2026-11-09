@@ -48,6 +48,7 @@ export type Tile = {
   poiClaimed: boolean;
   explored: boolean;
   visible: boolean;
+  territoryBaseId?: string;
   harvestedBy?: Faction;
   bridge?: { axis: "x" | "y"; faction: Faction };
 };
@@ -74,6 +75,7 @@ export type GameState = {
   botFaction: Faction;
   turn: number;
   activeFaction: Faction;
+  territoryVersion: 1;
   tokens: Record<Faction, number>;
   tiles: Tile[];
   bases: Base[];

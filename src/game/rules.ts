@@ -10,6 +10,7 @@ import {
   type UnitKind,
 } from "./model";
 import { makeCityName, makeIdentity } from "./names";
+import { claimCityTerritory } from "./territory";
 
 export function seededRandom(seed: string): () => number {
   let state = 0x811c9dc5;
@@ -97,10 +98,11 @@ export function canHarvestWithinCity(base: Base, tile: { x: number; y: number })
   return gridDistance(base, tile) <= Math.floor(base.resourceRange / 2);
 }
 
-export function healingAmount(state: Pick<GameState, "bases">, unit: Unit): number {
+export function healingAmount(state: Pick<GameState, "bases" | "tiles" | "size">, unit: Unit): number {
   const maxHp = UNIT_DEFINITIONS[unit.kind].maxHp;
   const ownCity = state.bases.some((base) => base.owner === unit.faction && base.x === unit.x && base.y === unit.y);
-  const enemyTerritory = state.bases.some((base) => base.owner !== null && base.owner !== unit.faction && canHarvestWithinCity(base, unit));
+  const territoryBaseId = state.tiles[unit.y * state.size + unit.x]?.territoryBaseId;
+  const enemyTerritory = state.bases.some((base) => base.id === territoryBaseId && base.owner !== null && base.owner !== unit.faction);
   const divisor = ownCity ? 2 : enemyTerritory ? 4 : 3;
   return Math.max(0, Math.min(maxHp - unit.hp, Math.ceil(maxHp / divisor)));
 }
@@ -142,14 +144,14 @@ export function resourceCity(state: GameState, tile: Tile, preferredBaseId?: str
     || state.bases.some((city) => city.x === tile.x && city.y === tile.y)
     || state.units.some((unit) => unit.x === tile.x && unit.y === tile.y && unit.faction !== state.playerFaction)) return undefined;
   const eligible = state.bases.filter((base) => base.owner === state.playerFaction
-    && !base.capture && canHarvestWithinCity(base, tile));
+    && !base.capture && tile.territoryBaseId === base.id);
   return eligible.find((base) => base.id === preferredBaseId) ?? eligible[0];
 }
 
 export function canHarvest(state: GameState, base: Base, tile: Tile, faction: Faction = state.playerFaction): boolean {
   const cost = resourceCost(tile);
   return state.status === "running" && base.owner === faction
-    && !base.capture && (faction !== state.playerFaction || tile.visible) && canHarvestWithinCity(base, tile)
+    && !base.capture && (faction !== state.playerFaction || tile.visible) && tile.territoryBaseId === base.id
     && !state.bases.some((city) => city.x === tile.x && city.y === tile.y)
     && !state.units.some((unit) => unit.x === tile.x && unit.y === tile.y && unit.faction !== faction)
     && cost !== null && state.tokens[faction] >= cost;
@@ -160,6 +162,7 @@ export function expandResourceArea(state: GameState, baseId: string): boolean {
   if (!base || base.resourceRange !== 3 || state.tokens[state.playerFaction] < 10) return false;
   state.tokens[state.playerFaction] -= 10;
   base.resourceRange = 5;
+  claimCityTerritory(state, base);
   return true;
 }
 
@@ -404,6 +407,7 @@ export function createGame(seed: string, size: number, playerFaction: Faction): 
     botFaction,
     turn: 1,
     activeFaction: playerFaction,
+    territoryVersion: 1,
     tokens: { lorgoshki: 7, robots: 7 },
     tiles,
     bases,
@@ -415,6 +419,7 @@ export function createGame(seed: string, size: number, playerFaction: Faction): 
     coinVisits: [],
     status: "running",
   };
+  for (const base of bases) if (base.owner !== null) claimCityTerritory(state, base);
   revealAround(state);
   return state;
 }
@@ -434,6 +439,7 @@ export function logEvent(state: GameState, ru: string, en: string): void {
 export function transferBase(state: GameState, base: Base, faction: Faction, unit: Unit): void {
   const oldOwner = base.owner;
   base.owner = faction;
+  if (oldOwner === null) claimCityTerritory(state, base);
   if (oldOwner === null && faction === "lorgoshki") {
     const networking = state.tech.lorgoshki[0];
     if (networking >= 1) base.rank = networking >= 3 ? 3 : 2;
