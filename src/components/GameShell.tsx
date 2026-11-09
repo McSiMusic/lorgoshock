@@ -188,6 +188,14 @@ function GameApp() {
     : message ?? TEXT.ru.aiFallback;
 
   useEffect(() => {
+    if (process.env.NODE_ENV !== "production" || !("serviceWorker" in navigator)) return;
+    void navigator.serviceWorker.register(new URL("./service-worker.js", document.baseURI), { updateViaCache: "none" })
+      .catch((error: unknown) => {
+        console.error("Unable to register the Lorgoshock service worker.", error);
+      });
+  }, []);
+
+  useEffect(() => {
     try {
       const saved = window.localStorage.getItem("lorgoshock-language");
       if (saved === "en" || saved === "ru") setLanguage(saved);
