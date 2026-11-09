@@ -23,7 +23,7 @@ export function createIsometricGrid(width: number, height: number, size: number)
 
 export function initialMapZoom(grid: IsometricGrid, mobile: boolean): number {
   if (!mobile) return 1.35;
-  return Math.min(16, Math.max(1.35, 150 / (grid.tileWidth * 2)));
+  return Math.min(16, Math.max(1.1, 120 / (grid.tileWidth * 2)));
 }
 
 export function fleePosition(attacker: Point, defender: Point, size: number, progress: number): Point {

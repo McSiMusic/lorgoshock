@@ -252,6 +252,23 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 
 .launch-button:hover { filter: brightness(1.09); transform: translateY(-1px); }
 .launch-button > span:last-child { font: 20px var(--sans); }
+.install-button {
+  width: 100%;
+  min-height: 41px;
+  margin-top: 9px;
+  padding: 0 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid #687c70;
+  background: #222b25;
+  color: #c9dec5;
+  font: 600 9px var(--mono);
+  letter-spacing: .1em;
+  cursor: pointer;
+}
+.install-button:hover { border-color: #9ab891; background: #29372b; }
+.install-help { margin: 8px 0 0; color: #a7b09c; font: 8px/1.6 var(--mono); }
 .setup-note { margin: 13px 0 0; color: #747a6e; font-size: 10px; text-align: center; }
 .setup-note strong { color: #abb096; font-weight: 500; }
 
@@ -822,6 +839,7 @@ html, body { width: 100%; height: 100%; overflow: hidden; overscroll-behavior: n
   .faction-label small { font-size: 6px; }
   .setup-row { min-height: 36px; }
   .launch-button { min-height: 39px; margin-top: 10px; }
+  .install-button { min-height: 37px; font-size: 7px; }
   .setup-note { margin-top: 7px; font-size: 8px; }
   .landing-footer { min-height: 22px; font-size: 6px; }
 
@@ -883,6 +901,7 @@ html, body { width: 100%; height: 100%; overflow: hidden; overscroll-behavior: n
   .faction-option { min-height: 40px; }
   .setup-row { min-height: 31px; }
   .launch-button { min-height: 34px; margin-top: 7px; }
+  .install-button { min-height: 32px; }
   .setup-note { margin-top: 5px; }
   .landing-footer { min-height: 18px; }
 }

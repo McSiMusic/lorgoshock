@@ -19,11 +19,11 @@ export function unitArtKey(unit: Unit): UnitArtKey {
   if (unit.kind === "drone") return "robotDrone";
   if (unit.kind === "vacuum") return "robotVacuum";
   if (unit.faction === "robots") return "robotWorker";
-  if (unit.kind === "senior") return "seniorHipster";
-  if (unit.kind === "middle") return unit.id.length % 2 === 0 ? "hipsterWomanAlt" : "seniorHipster";
-  return unit.id.length % 2 === 0 ? "hipsterWoman" : "hipsterMan";
+  if (unit.kind === "senior") return unit.gender === "female" ? "hipsterWomanAlt" : "seniorHipster";
+  if (unit.kind === "middle") return unit.gender === "female" ? "hipsterWomanAlt" : "seniorHipster";
+  return unit.gender === "female" ? "hipsterWoman" : "hipsterMan";
 }
 
 export function unitPortraitPath(unit: Unit): string {
-  return `/game-art/${UNIT_ART_FILES[unitArtKey(unit)]}`;
+  return `game-art/${UNIT_ART_FILES[unitArtKey(unit)]}`;
 }

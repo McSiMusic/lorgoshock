@@ -13,6 +13,10 @@ import TechnologyTree from "./TechnologyTree";
 
 type Language = "en" | "ru";
 type Panel = "tech" | "log" | null;
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
+};
 
 const TEXT: Record<Language, Record<string, string>> = {
   en: {
@@ -20,6 +24,7 @@ const TEXT: Record<Language, Record<string, string>> = {
     intro: "Build your company, explore a vivid world, gather resources, and meet the rival robots.", newGame: "NEW GAME",
     chooseFaction: "Choose your team", lorgoshki: "Lorgoshki", robots: "Robots", mapSize: "MAP SIZE",
     quick: "Quick", career: "Career", large: "Large", start: "START GAME", local: "World and rival are generated locally.",
+    installApp: "INSTALL APP", installHelp: "On iPhone/iPad, use Share → Add to Home Screen. Otherwise, open the browser menu and choose Install app or Add to Home screen.",
     resume: "RESUME GAME", saveError: "Unable to access the saved game in this browser.", invalidSave: "The saved game is invalid or from an unsupported version.",
     turn: "TURN", yourTurn: "YOUR TURN", opponentTurn: "OPPONENT'S TURN", leave: "EXIT", yourTeam: "YOUR TEAM", rival: "RIVAL ROBOTS",
     neutral: "UNCLAIMED STARTUP", fog: "UNDISCOVERED", tip: "Select a unit, then choose a highlighted tile to move. Click your company to train units.",
@@ -63,6 +68,7 @@ const TEXT: Record<Language, Record<string, string>> = {
     intro: "Развивай компанию, исследуй красочный мир, собирай ресурсы и встречай роботов-соперников.", newGame: "НОВАЯ ИГРА",
     chooseFaction: "Выбери команду", lorgoshki: "Лоргошки", robots: "Роботы", mapSize: "РАЗМЕР КАРТЫ",
     quick: "Быстрая", career: "Карьера", large: "Большая", start: "НАЧАТЬ ИГРУ", local: "Мир и соперник создаются локально.",
+    installApp: "УСТАНОВИТЬ ПРИЛОЖЕНИЕ", installHelp: "На iPhone/iPad нажми «Поделиться» → «На экран Домой». В других браузерах открой меню и выбери «Установить приложение» или «Добавить на главный экран».",
     resume: "ПРОДОЛЖИТЬ ИГРУ", saveError: "Не удалось получить доступ к сохранению в браузере.", invalidSave: "Сохранение повреждено или создано неподдерживаемой версией.",
     turn: "ХОД", yourTurn: "ТВОЯ ОЧЕРЕДЬ", opponentTurn: "ХОД СОПЕРНИКА", leave: "ВЫЙТИ", yourTeam: "ТВОЯ КОМАНДА", rival: "РОБОТЫ-СОПЕРНИКИ",
     neutral: "СВОБОДНЫЙ СТАРТАП", fog: "НЕ ИССЛЕДОВАНО", tip: "Выбери юнита, затем нажми на подсвеченную клетку. Нажми на компанию, чтобы тренировать юнитов.",
@@ -129,6 +135,9 @@ function GameApp() {
   const [language, setLanguage] = useState<Language>("en");
   const [faction, setFaction] = useState<Faction>("lorgoshki");
   const [mapSize, setMapSize] = useState(16);
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [showInstallHelp, setShowInstallHelp] = useState(false);
+  const [isInstalled, setIsInstalled] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedCoffeeId, setSelectedCoffeeId] = useState<string | null>(null);
   const [selectedPosition, setSelectedPosition] = useState<{ x: number; y: number } | null>(null);
@@ -186,6 +195,30 @@ function GameApp() {
   const getError = (message?: string) => languageRef.current === "en"
     ? TEXT.en.aiFallback
     : message ?? TEXT.ru.aiFallback;
+
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (event: Event) => {
+      const promptEvent = event as BeforeInstallPromptEvent;
+      if (typeof promptEvent.prompt !== "function") return;
+      event.preventDefault();
+      setInstallPrompt(promptEvent);
+    };
+    const handleAppInstalled = () => {
+      setIsInstalled(true);
+      setInstallPrompt(null);
+      setShowInstallHelp(false);
+    };
+
+    const standalone = window.matchMedia("(display-mode: standalone)").matches
+      || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+    setIsInstalled(standalone);
+    window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+    window.addEventListener("appinstalled", handleAppInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", handleAppInstalled);
+    };
+  }, []);
 
   useEffect(() => {
     if (process.env.NODE_ENV !== "production" || !("serviceWorker" in navigator)) return;
@@ -394,6 +427,24 @@ function GameApp() {
     send({ type: "START", seed: safeSeed, size: mapSize, faction });
   };
 
+  const installApp = async () => {
+    setShowInstallHelp(false);
+    if (!installPrompt) {
+      setShowInstallHelp(true);
+      return;
+    }
+
+    try {
+      await installPrompt.prompt();
+      const { outcome } = await installPrompt.userChoice;
+      setInstallPrompt(null);
+      if (outcome === "dismissed") setShowInstallHelp(true);
+    } catch (installError) {
+      console.error("Unable to prompt for Lorgoshock installation.", installError);
+      setShowInstallHelp(true);
+    }
+  };
+
   const units = game?.units ?? [];
   const displayedTokens = game ? game.tokens[game.playerFaction] - Object.values(pendingIncome).reduce((sum, amount) => sum + amount, 0) : 0;
   const income = game ? game.bases.filter((base) => base.owner === game.playerFaction)
@@ -549,6 +600,10 @@ function GameApp() {
             </div>
             <div className="setup-row"><label htmlFor="map-size">{text.mapSize}</label><select id="map-size" value={mapSize} onChange={(event) => setMapSize(Number(event.target.value))}>{MAP_SIZES.map((size) => <option value={size} key={size}>{size} × {size} · {size === 8 ? text.quick : size === 16 ? text.career : text.large}</option>)}</select></div>
             <button type="button" className="launch-button" onClick={startGame}><span>{text.start}</span><span>↗</span></button>
+            {!isInstalled && <button type="button" className="install-button" onClick={installApp}>
+              <span>⇩ {text.installApp}</span><span>↗</span>
+            </button>}
+            {showInstallHelp && <p className="install-help" role="status">{text.installHelp}</p>}
             {savedGame && <button type="button" className="launch-button resume-button" onClick={() => {
               window.history.replaceState({}, "", window.location.pathname);
               setCombatEvents([]);

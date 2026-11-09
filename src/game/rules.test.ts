@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createIsometricGrid, fleePosition, initialMapZoom, screenToTile, tileCenter } from "./isometric";
-import { MAP_SIZES } from "./model";
+import { MAP_SIZES, type Unit } from "./model";
 import { makeIdentity } from "./names";
+import { unitArtKey, unitPortraitPath } from "./unitArt";
 import {
   canHarvestWithinCity,
   canAttack,
@@ -34,6 +35,27 @@ describe("game rules", () => {
     expect(names.some((identity) => identity.gender === "female")).toBe(true);
     for (const identity of names) expect(identity.gender === "male" ? men : women).toContain(identity.name.ru);
     expect(makeIdentity("names", "courier-1", "lorgoshki", "courier", [])).toEqual(names[1]);
+  });
+
+  it("uses a unit's gender for its portrait and keeps portrait URLs under the app path", () => {
+    const makeUnit = (gender: Unit["gender"]): Unit => ({
+      id: "lorgoshki-1",
+      name: { en: "Miroslava", ru: "Мирослава" },
+      gender,
+      x: 0,
+      y: 0,
+      faction: "lorgoshki",
+      kind: "junior",
+      homeBaseId: null,
+      hp: 5,
+      moved: false,
+      attacked: false,
+    });
+
+    const miroslava = makeUnit("female");
+    expect(unitArtKey(miroslava)).toBe("hipsterWoman");
+    expect(unitPortraitPath(miroslava)).toBe("game-art/units/mobile-hipster-woman.png");
+    expect(unitArtKey(makeUnit("male"))).toBe("hipsterMan");
   });
   it("creates the same balanced world for the same seed", () => {
     const first = createGame("test-seed", 16, "lorgoshki");
@@ -463,9 +485,9 @@ describe("game rules", () => {
   it("uses a larger, tile-sized starting zoom on mobile while preserving desktop scale", () => {
     const grid = createIsometricGrid(360, 500, 16);
     const zoom = initialMapZoom(grid, true);
-    expect(grid.tileWidth * 2 * zoom).toBeCloseTo(150);
+    expect(grid.tileWidth * 2 * zoom).toBeCloseTo(120);
     const largeGrid = createIsometricGrid(390, 600, 32);
-    expect(largeGrid.tileWidth * 2 * initialMapZoom(largeGrid, true)).toBeCloseTo(150);
+    expect(largeGrid.tileWidth * 2 * initialMapZoom(largeGrid, true)).toBeCloseTo(120);
     expect(initialMapZoom(grid, false)).toBe(1.35);
   });
 
