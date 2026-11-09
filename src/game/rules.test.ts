@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createIsometricGrid, screenToTile, tileCenter } from "./isometric";
+import { createIsometricGrid, fleePosition, initialMapZoom, screenToTile, tileCenter } from "./isometric";
 import { MAP_SIZES } from "./model";
 import { makeIdentity } from "./names";
 import {
@@ -108,10 +108,12 @@ describe("game rules", () => {
     expect(createGame("different-a", size, "lorgoshki").tiles).not.toEqual(createGame("different-b", size, "lorgoshki").tiles);
   });
 
-  it("limits map generation to supported sizes no larger than 32", () => {
-    expect(MAP_SIZES).toEqual([16, 24, 32]);
-    expect(() => createGame("oversized", 64, "lorgoshki")).toThrow(/16, 24, 32/);
-    expect(createGame("largest", 32, "lorgoshki").size).toBe(32);
+  it("limits map generation to supported sizes", () => {
+    expect(MAP_SIZES).toEqual([8, 16, 24]);
+    expect(() => createGame("oversized", 64, "lorgoshki")).toThrow(/8, 16, 24/);
+    expect(() => createGame("unsupported", 32, "lorgoshki")).toThrow(/8, 16, 24/);
+    expect(createGame("smallest", 8, "lorgoshki").size).toBe(8);
+    expect(createGame("largest", 24, "lorgoshki").size).toBe(24);
   });
 
   it("keeps neutral and enemy bases hidden until their tiles are explored", () => {
@@ -385,6 +387,9 @@ describe("game rules", () => {
       game.tiles[5 * game.size + 7].terrain = "plain";
       game.tiles[4 * game.size + 6].terrain = "water";
       expect(canBuildBridge(game, base, tile, "y")).toBe(false);
+      const outsideCity = game.tiles[8 * game.size + 8];
+      outsideCity.terrain = "water";
+      expect(canBuildBridge(game, base, outsideCity, "x")).toBe(true);
       game.tiles[5 * game.size + 7].terrain = "water";
       expect(bridgeAxis(game, base, tile)).toBeUndefined();
       game.tiles[5 * game.size + 7].terrain = "plain";
@@ -453,5 +458,20 @@ describe("game rules", () => {
 
     const grid = createIsometricGrid(504, 430, 16);
     expect(screenToTile(grid, { x: 0, y: 0 })).toBeNull();
+  });
+
+  it("uses a larger, tile-sized starting zoom on mobile while preserving desktop scale", () => {
+    const grid = createIsometricGrid(360, 500, 16);
+    const zoom = initialMapZoom(grid, true);
+    expect(grid.tileWidth * 2 * zoom).toBeCloseTo(150);
+    const largeGrid = createIsometricGrid(390, 600, 32);
+    expect(largeGrid.tileWidth * 2 * initialMapZoom(largeGrid, true)).toBeCloseTo(150);
+    expect(initialMapZoom(grid, false)).toBe(1.35);
+  });
+
+  it("makes a defeated unit flee away from the attacker and off the map", () => {
+    expect(fleePosition({ x: 2, y: 4 }, { x: 4, y: 4 }, 8, 0.5)).toEqual({ x: 6, y: 4 });
+    expect(fleePosition({ x: 2, y: 4 }, { x: 4, y: 4 }, 8, 1)).toEqual({ x: 8, y: 4 });
+    expect(fleePosition({ x: 4, y: 4 }, { x: 3, y: 3 }, 8, 1)).toEqual({ x: -1, y: -1 });
   });
 });

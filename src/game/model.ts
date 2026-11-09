@@ -1,7 +1,7 @@
 export type Faction = "lorgoshki" | "robots";
 export type Terrain = "plain" | "forest" | "mountain" | "water";
 export type UnitKind = "junior" | "courier" | "middle" | "senior" | "workerBot" | "drone" | "vacuum";
-export const MAP_SIZES = [16, 24, 32] as const;
+export const MAP_SIZES = [8, 16, 24] as const;
 export type Base = {
   id: string;
   name: LocalizedName;

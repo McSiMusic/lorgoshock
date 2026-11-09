@@ -6,6 +6,7 @@ import { MAP_SIZES, UNIT_BY_TIER, UNIT_DEFINITIONS, type BotAction, type CombatE
 import { COMBAT_DURATION, RESOURCE_DURATION, TRANSFORMATION_DURATION } from "../game/animation";
 import { SAVE_KEY, savedGameSchema } from "../game/save";
 import { attackRange, bridgeAxis, canAttack, canHarvest, canHarvestWithinCity, canMoveTo, cityCapacity, cityOccupancy, effectiveAttack, hasUnitAction, healingAmount, hireCost, incomeForRank, progressToNextRank, resourceCity as findResourceCity, resourceCost, resourceProgress } from "../game/rules";
+import { unitPortraitPath } from "../game/unitArt";
 import { makeStore, resetState, setError, syncState, type AppDispatch, type RootState } from "../state/store";
 import MapView from "./MapView";
 import TechnologyTree from "./TechnologyTree";
@@ -17,10 +18,10 @@ const TEXT: Record<Language, Record<string, string>> = {
   en: {
     tagline: "A bright, independent strategy · 2026", offline: "NO SERVER REQUIRED", strategy: "A BRIGHT 4X STRATEGY",
     intro: "Build your company, explore a vivid world, gather resources, and meet the rival robots.", newGame: "NEW GAME",
-    chooseFaction: "Choose your team", lorgoshki: "Lorgoshki", robots: "Robots", mapSize: "MAP SIZE", seed: "GAME SEED",
+    chooseFaction: "Choose your team", lorgoshki: "Lorgoshki", robots: "Robots", mapSize: "MAP SIZE",
     quick: "Quick", career: "Career", large: "Large", start: "START GAME", local: "World and rival are generated locally.",
     resume: "RESUME GAME", saveError: "Unable to access the saved game in this browser.", invalidSave: "The saved game is invalid or from an unsupported version.",
-    turn: "TURN", yourTurn: "YOUR TURN", opponentTurn: "OPPONENT'S TURN", leave: "EXIT", field: "MAP", yourTeam: "YOUR TEAM", rival: "RIVAL ROBOTS",
+    turn: "TURN", yourTurn: "YOUR TURN", opponentTurn: "OPPONENT'S TURN", leave: "EXIT", yourTeam: "YOUR TEAM", rival: "RIVAL ROBOTS",
     neutral: "UNCLAIMED STARTUP", fog: "UNDISCOVERED", tip: "Select a unit, then choose a highlighted tile to move. Click your company to train units.",
     openTech: "TECHNOLOGY", openLog: "LOG", emptyLog: "No events yet.", endTurn: "END TURN", city: "COMPANY", train: "TRAIN A UNIT IN YOUR COMPANY",
     level: "LEVEL", perTurn: "PER TURN", garrison: "Units here", expand: "EXPAND RESOURCE AREA TO 5×5",
@@ -43,7 +44,8 @@ const TEXT: Record<Language, Record<string, string>> = {
     geeseHuman: "Domesticate the goose for the team.", geeseRobot: "Cybernetically upgrade the goose into a robogoose.",
     mountainHuman: "Build hiking trails for the team.", mountainRobot: "Open lithium quarries for the machines.",
     waterHuman: "Organize a workation by the sea.", waterRobot: "Drain the water to cool data centers.",
-    mountainVision: "A unit on a mountain reveals terrain within radius 3.", bridge: "BUILD BRIDGE", bridgeHint: "Build a bridge between opposite land tiles for 5 tokens. Its direction is chosen automatically.", gathered: "Already gathered.",
+    expandForResource: "Try expanding a company's resource area to reach this tile.",
+    mountainVision: "A unit on a mountain reveals terrain within radius 3.", bridge: "BUILD BRIDGE", bridgeHint: "Build a bridge across one water tile for 5 tokens. Its direction is chosen automatically.", gathered: "Already gathered.",
     unavailable: "COMING LATER",
     builtBridge: "Bridge built.",
     resourceProgress: "PROGRESS", resourceAlternative: "TOKENS INSTEAD",
@@ -59,10 +61,10 @@ const TEXT: Record<Language, Record<string, string>> = {
   ru: {
     tagline: "Яркая независимая стратегия · 2026", offline: "СЕРВЕР НЕ НУЖЕН", strategy: "ЯРКАЯ СТРАТЕГИЯ 4X",
     intro: "Развивай компанию, исследуй красочный мир, собирай ресурсы и встречай роботов-соперников.", newGame: "НОВАЯ ИГРА",
-    chooseFaction: "Выбери команду", lorgoshki: "Лоргошки", robots: "Роботы", mapSize: "РАЗМЕР КАРТЫ", seed: "СИД ИГРЫ",
+    chooseFaction: "Выбери команду", lorgoshki: "Лоргошки", robots: "Роботы", mapSize: "РАЗМЕР КАРТЫ",
     quick: "Быстрая", career: "Карьера", large: "Большая", start: "НАЧАТЬ ИГРУ", local: "Мир и соперник создаются локально.",
     resume: "ПРОДОЛЖИТЬ ИГРУ", saveError: "Не удалось получить доступ к сохранению в браузере.", invalidSave: "Сохранение повреждено или создано неподдерживаемой версией.",
-    turn: "ХОД", yourTurn: "ТВОЯ ОЧЕРЕДЬ", opponentTurn: "ХОД СОПЕРНИКА", leave: "ВЫЙТИ", field: "КАРТА", yourTeam: "ТВОЯ КОМАНДА", rival: "РОБОТЫ-СОПЕРНИКИ",
+    turn: "ХОД", yourTurn: "ТВОЯ ОЧЕРЕДЬ", opponentTurn: "ХОД СОПЕРНИКА", leave: "ВЫЙТИ", yourTeam: "ТВОЯ КОМАНДА", rival: "РОБОТЫ-СОПЕРНИКИ",
     neutral: "СВОБОДНЫЙ СТАРТАП", fog: "НЕ ИССЛЕДОВАНО", tip: "Выбери юнита, затем нажми на подсвеченную клетку. Нажми на компанию, чтобы тренировать юнитов.",
     openTech: "ТЕХНОЛОГИИ", openLog: "ЖУРНАЛ", emptyLog: "Событий пока нет.", endTurn: "ЗАВЕРШИТЬ ХОД", city: "КОМПАНИЯ", train: "ТРЕНИРОВКА ЮНИТА В КОМПАНИИ",
     level: "УРОВЕНЬ", perTurn: "ЗА ХОД", garrison: "Юнитов здесь", expand: "РАСШИРИТЬ ОБЛАСТЬ РЕСУРСОВ ДО 5×5",
@@ -85,7 +87,8 @@ const TEXT: Record<Language, Record<string, string>> = {
     geeseHuman: "Одомашнить гуся для команды.", geeseRobot: "Кибернетизировать гуся и превратить его в робогуся.",
     mountainHuman: "Открыть хайк-тропы для команды.", mountainRobot: "Открыть литиевые карьеры для машин.",
     waterHuman: "Устроить воркейшн у моря.", waterRobot: "Осушить водоём для охлаждения дата-центров.",
-    mountainVision: "Юнит на горе открывает местность в радиусе 3 клеток.", bridge: "ПОСТРОИТЬ МОСТ", bridgeHint: "Мост за 5 токенов соединяет сушу по противоположным сторонам воды. Направление выбирается автоматически.", gathered: "Ресурс уже собран.",
+    expandForResource: "Попробуй расширить область ресурсов компании, чтобы добраться до этой клетки.",
+    mountainVision: "Юнит на горе открывает местность в радиусе 3 клеток.", bridge: "ПОСТРОИТЬ МОСТ", bridgeHint: "Мост за 5 токенов занимает одну водную клетку. Направление выбирается автоматически.", gathered: "Ресурс уже собран.",
     unavailable: "ПОЗЖЕ",
     builtBridge: "Мост построен.",
     resourceProgress: "ПРОГРЕСС", resourceAlternative: "ВМЕСТО ПРОГРЕССА",
@@ -126,7 +129,6 @@ function GameApp() {
   const [language, setLanguage] = useState<Language>("en");
   const [faction, setFaction] = useState<Faction>("lorgoshki");
   const [mapSize, setMapSize] = useState(16);
-  const [seed, setSeed] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedCoffeeId, setSelectedCoffeeId] = useState<string | null>(null);
   const [selectedPosition, setSelectedPosition] = useState<{ x: number; y: number } | null>(null);
@@ -186,7 +188,6 @@ function GameApp() {
     : message ?? TEXT.ru.aiFallback;
 
   useEffect(() => {
-    setSeed((current) => current || createSeed());
     try {
       const saved = window.localStorage.getItem("lorgoshock-language");
       if (saved === "en" || saved === "ru") setLanguage(saved);
@@ -327,7 +328,6 @@ function GameApp() {
     const sharedSize = Number(query.get("map"));
     if (sharedSeed && !savePresent) {
       startingRef.current = true;
-      setSeed(sharedSeed);
       if (sharedFaction === "robots" || sharedFaction === "lorgoshki") setFaction(sharedFaction);
       if (MAP_SIZES.some((size) => size === sharedSize)) setMapSize(sharedSize);
       worker.postMessage({
@@ -368,8 +368,7 @@ function GameApp() {
   };
 
   const startGame = () => {
-    const safeSeed = seed.trim() || createSeed();
-    setSeed(safeSeed);
+    const safeSeed = createSeed();
     setCombatEvents([]);
     setResourceEvents([]);
     setIncomeEvents([]);
@@ -415,7 +414,7 @@ function GameApp() {
   const describedTile = resourceTile ?? (!selectedUnit && !resourceCity && inspectedTile?.explored ? inspectedTile : undefined);
   const bridgeBase = describedTile && game && describedTile.terrain === "water"
     ? game.bases.find((base) => bridgeAxis(game, base, describedTile))
-      ?? game.bases.find((base) => base.owner === game.playerFaction && !base.capture && canHarvestWithinCity(base, describedTile))
+      ?? game.bases.find((base) => base.owner === game.playerFaction && !base.capture)
     : undefined;
   const inspectedBase = inspectedTile && (inspectedTile.explored || revealMap) && game
     ? game.bases.find((base) => base.x === inspectedTile.x && base.y === inspectedTile.y && base.owner !== game.playerFaction)
@@ -527,7 +526,7 @@ function GameApp() {
             <div className="eyebrow"><span className="eyebrow-line" /> {text.strategy}</div>
             <h1>Lorgoshock<span>:</span><br /><em>Open to Work</em></h1>
             <p className="intro">{text.intro}</p>
-            <div className="hero-stats"><span><strong>4X</strong> explore and expand</span><span><strong>32×32</strong> maximum map</span><span><strong>0</strong> server required</span></div>
+            <div className="hero-stats"><span><strong>4X</strong> explore and expand</span><span><strong>24×24</strong> maximum map</span><span><strong>0</strong> server required</span></div>
           </div>
           <div className="setup-card">
             <div className="card-kicker">{text.newGame}<span>01 — SETUP</span></div>
@@ -540,8 +539,7 @@ function GameApp() {
                 <span className="faction-emoji">🤖</span><span className="faction-label"><strong>{text.robots}</strong><small>LITHIUM · SERVERS · ALGORITHMS</small></span><span className="radio-dot" />
               </button>
             </div>
-            <div className="setup-row"><label htmlFor="map-size">{text.mapSize}</label><select id="map-size" value={mapSize} onChange={(event) => setMapSize(Number(event.target.value))}>{MAP_SIZES.map((size) => <option value={size} key={size}>{size} × {size} · {size === 16 ? text.quick : size === 24 ? text.career : text.large}</option>)}</select></div>
-            <div className="setup-row"><label htmlFor="seed">{text.seed}</label><div className="seed-control"><input id="seed" value={seed} onChange={(event) => setSeed(event.target.value)} maxLength={24} /><button type="button" aria-label="Generate seed" onClick={() => setSeed(createSeed())}>⟳</button></div></div>
+            <div className="setup-row"><label htmlFor="map-size">{text.mapSize}</label><select id="map-size" value={mapSize} onChange={(event) => setMapSize(Number(event.target.value))}>{MAP_SIZES.map((size) => <option value={size} key={size}>{size} × {size} · {size === 8 ? text.quick : size === 16 ? text.career : text.large}</option>)}</select></div>
             <button type="button" className="launch-button" onClick={startGame}><span>{text.start}</span><span>↗</span></button>
             {savedGame && <button type="button" className="launch-button resume-button" onClick={() => {
               window.history.replaceState({}, "", window.location.pathname);
@@ -565,7 +563,6 @@ function GameApp() {
   return (
     <main className="game-screen">
       <header className="game-header">
-        <a className="game-brand" href="./"><span className="brand-mark">LS</span><span>LORGOSHOCK<small>OPEN TO WORK</small></span></a>
         <div className="turn-indicator"><i /> {text.turn} {game.turn} <span>·</span> {replaying ? text.opponentTurn : text.yourTurn}</div>
         <div className="header-right">
           <div className="wallet"><span>◈</span> {displayedTokens}T <small>(+{income} {text.tokens})</small></div>
@@ -579,7 +576,6 @@ function GameApp() {
       {storageError && <div className="save-warning" role="alert">{text[storageError]}</div>}
       <section className="game-layout">
         <div className="map-column">
-          <div className="map-caption"><span><i /> {text.field} {game.size} × {game.size}</span><span>SEED · {game.seed}</span></div>
           <label className="fog-toggle" title={text.revealMapHint}>
             <span>DEBUG · {text.revealMap}</span>
             <input type="checkbox" role="switch" checked={revealMap} onChange={(event) => setRevealMap(event.target.checked)} aria-label={text.revealMapHint} />
@@ -613,6 +609,7 @@ function GameApp() {
             <div className="context-title">{text[describedTile.terrain === "forest" ? "forest" : describedTile.geese ? "geese" : describedTile.terrain]} {resourceCost(describedTile) !== null ? `· ${resourceCost(describedTile)} ${text.tokens} · +${resourceProgress(describedTile)} ${text.progress}` : `· ${describedTile.bridge ? text.builtBridge : text.gathered}`}
             </div>
             <div className="context-title">{text[`${describedTile.terrain === "forest" ? "forest" : describedTile.geese ? "geese" : describedTile.terrain}${game.playerFaction === "robots" ? "Robot" : "Human"}`]} {describedTile.terrain === "mountain" && text.mountainVision}</div>
+            {resourceCost(describedTile) !== null && !findResourceCity(game, describedTile) && <div className="context-title">{text.expandForResource}</div>}
             {bridgeBase && !describedTile.bridge && <div className="context-title">{text.bridgeHint}</div>}
             <div className="context-options">{resourceTile && resourceBase && resourceCost(resourceTile) !== null && <button type="button" className="context-option"
               disabled={!canHarvest(game, resourceBase, resourceTile) || displayedTokens < (resourceCost(resourceTile) ?? 0)}
@@ -654,7 +651,7 @@ function GameApp() {
           <div className="action-bar">
             <div className="selection-summary">
               {resourceCity ? <span className="action-hint">{text.cityResources}</span>
-                : selectedUnit ? <><span className="selection-icon">{UNIT_DEFINITIONS[selectedUnit.kind].emoji}</span><span><strong>{selectedUnit.name[language]} · {unitName(selectedUnit.kind)}</strong><small>{hasUnitAction(game, selectedUnit) ? text.ready : text.spent} · {selectedUnit.hp}/{UNIT_DEFINITIONS[selectedUnit.kind].maxHp} HP · {text.attackStat} {Number(effectiveAttack(game, selectedUnit).toFixed(1))} · {text.rangeStat} {attackRange(game, selectedUnit)}</small></span></>
+                : selectedUnit ? <><img className="selection-portrait" src={unitPortraitPath(selectedUnit)} alt="" /><span><strong>{selectedUnit.name[language]} · {unitName(selectedUnit.kind)}</strong><small>{hasUnitAction(game, selectedUnit) ? text.ready : text.spent} · {selectedUnit.hp}/{UNIT_DEFINITIONS[selectedUnit.kind].maxHp} HP · {text.attackStat} {Number(effectiveAttack(game, selectedUnit).toFixed(1))} · {text.rangeStat} {attackRange(game, selectedUnit)}</small></span></>
                 : <span className="action-hint">{selectedPosition ? text.empty : text.tip}</span>}
             </div>
             {selectedUnit && <button type="button" className="action-button heal-action" disabled={selectedUnit.moved || selectedUnit.attacked || healingAmount(game, selectedUnit) <= 0}
@@ -681,7 +678,7 @@ function GameApp() {
       {game.status !== "running" && !resultPending && <div className="modal-backdrop"><section className="result-modal" role="dialog" aria-modal="true" aria-labelledby="result-title"><div className="coffee-cup">{game.status === "won" ? "🏆" : "🤖"}</div><div className="eyebrow">{game.status === "won" ? text.statusWin : text.statusLost}</div><h2 id="result-title">{game.status === "won" ? text.won : text.lost}</h2><button className="launch-button" type="button" onClick={clearGame}>{text.next} <span>↗</span></button></section></div>}
       {error && <div className="error-toast" role="alert">{error}<button type="button" onClick={() => dispatch(setError(null))}>✕</button></div>}
       {replaying && <div className="ai-playback-block" role="status" aria-label={text.opponentTurn} />}
-      <footer className="game-footer"><span>SEED {game.seed} · {text.objective}</span><span>{neutralBases} {text.neutralCity.toUpperCase()} · {enemyBases} {text.opponent}</span></footer>
+      <footer className="game-footer"><span>{text.objective}</span><span>{neutralBases} {text.neutralCity.toUpperCase()} · {enemyBases} {text.opponent}</span></footer>
     </main>
   );
 }

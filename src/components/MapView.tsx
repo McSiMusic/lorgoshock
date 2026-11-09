@@ -3,11 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Application, Assets, Container, Graphics, Sprite, Text, Texture } from "pixi.js";
 import { OutlineFilter } from "pixi-filters";
-import { createIsometricGrid, screenToTile, tileCenter } from "../game/isometric";
+import { createIsometricGrid, fleePosition, initialMapZoom, screenToTile, tileCenter } from "../game/isometric";
 import { buildingKind, buildingLayout } from "../game/buildings";
 import { BOT_FOCUS_DURATION, COMBAT_DURATION, INCOME_DURATION, RESOURCE_ARRIVAL, RESOURCE_DURATION, TRANSFORMATION_DURATION, advancePosition, incomeCoinAmount, incomeCoinCount, incomeCoinProgress, resourceStarProgress, transformationFrame } from "../game/animation";
 import { UNIT_DEFINITIONS, type Base, type CombatEvent, type GameState, type IncomeEvent, type MovementEvent, type ResourceEvent, type Terrain, type Unit } from "../game/model";
-import { canAttack, canHarvestWithinCity, canMoveTo, cityCapacity, cityOccupancy, damage, gridDistance, hasCover, hasUnitAction, progressToNextRank, resourceCity } from "../game/rules";
+import { canAttack, canHarvestWithinCity, canMoveTo, cityCapacity, cityOccupancy, damage, gridDistance, hasCover, hasUnitAction, resourceCity } from "../game/rules";
+import { UNIT_ART_FILES, unitArtKey } from "../game/unitArt";
 
 type Props = {
   game: GameState;
@@ -32,17 +33,7 @@ type Props = {
 };
 
 const ART_FILES = {
-  units: {
-    hipsterMan: "units/hipster-man.png",
-    hipsterWoman: "units/hipster-woman.png",
-    courier: "units/courier-scooter-woman.png",
-    courierMan: "units/courier-scooter-man.png",
-    seniorHipster: "units/senior-hipster.png",
-    robotWorker: "units/robot-worker.png",
-    robotDrone: "units/robot-drone.png",
-    robotVacuum: "units/robot-vacuum.png",
-    hipsterWomanAlt: "units/hipster-woman-alt.png",
-  },
+  units: UNIT_ART_FILES,
   world: {
     meadowA: "world/meadow-a.png",
     meadowB: "world/meadow-b.png",
@@ -89,11 +80,14 @@ function outline(): OutlineFilter {
   return whiteOutline;
 }
 
-async function loadGameArt(): Promise<GameArt> {
+async function loadGameArt(onProgress: (progress: number) => void): Promise<GameArt> {
   const entries = Object.entries({ ...ART_FILES.units, ...ART_FILES.world });
+  let loaded = 0;
   const textures = await Promise.all(entries.map(async ([name, file]) => {
     const url = new URL(`game-art/${file}`, window.location.href).href;
-    return [name, await Assets.load<Texture>({ src: url, data: { autoGenerateMipmaps: true, scaleMode: "linear" } })] as const;
+    const texture = await Assets.load<Texture>({ src: url, data: { autoGenerateMipmaps: true, scaleMode: "linear" } });
+    onProgress(++loaded / entries.length);
+    return [name, texture] as const;
   }));
   return Object.fromEntries(textures) as GameArt;
 }
@@ -148,8 +142,8 @@ function drawBridge(root: Container, x: number, y: number, width: number, height
   const graphics = new Graphics();
   const direction = axis === "x" ? 1 : -1;
   const point = (along: number, across: number, lift = 0) => ({
-    x: x + along * width * 0.94 + across * width * 0.22,
-    y: y + direction * along * height * 0.94 - direction * across * height * 0.22 - lift * height,
+    x: x + along * width * 0.42 + across * width * 0.09,
+    y: y + direction * along * height * 0.21 - direction * across * height * 0.09 - lift * height * 0.08,
   });
   const line = (a: ReturnType<typeof point>, b: ReturnType<typeof point>, color: number, thickness: number, alpha = 1) =>
     graphics.moveTo(a.x, a.y).lineTo(b.x, b.y).stroke({ color, width: Math.max(0.7, width * thickness), alpha });
@@ -181,12 +175,12 @@ function drawBridge(root: Container, x: number, y: number, width: number, height
   }
   for (const across of [-1, 1]) {
     for (const along of [-0.9, -0.3, 0.3, 0.9]) {
-      line(point(along, across), point(along, across, 0.42), robot ? 0x315568 : 0x70462c, 0.075);
-      const cap = point(along, across, 0.43);
+      line(point(along, across), point(along, across, 0.3), robot ? 0x315568 : 0x70462c, 0.075);
+      const cap = point(along, across, 0.32);
       graphics.circle(cap.x, cap.y, Math.max(0.8, width * 0.055)).fill(robot ? 0x8afaff : 0xf2c989);
     }
-    line(point(-0.95, across, 0.42), point(0.95, across, 0.42), robot ? 0x68eafa : 0xd5a36d, 0.045);
-    line(point(-0.95, across, 0.22), point(0.95, across, 0.22), robot ? 0x3eb7d5 : 0x9e6d43, 0.025);
+    line(point(-0.95, across, 0.3), point(0.95, across, 0.3), robot ? 0x68eafa : 0xd5a36d, 0.045);
+    line(point(-0.95, across, 0.14), point(0.95, across, 0.14), robot ? 0x3eb7d5 : 0x9e6d43, 0.025);
   }
   root.addChild(graphics);
 }
@@ -298,48 +292,29 @@ function drawBase(root: Container, grid: ReturnType<typeof createIsometricGrid>,
   if (base.rank >= 4 && base.owner) city.filters = [outline()];
 }
 
-function drawCaptureBadge(root: Container, grid: ReturnType<typeof createIsometricGrid>, game: GameState, base: GameState["bases"][number], art: GameArt, language: Props["language"], revealMap: boolean): void {
+function drawCaptureBadge(root: Container, grid: ReturnType<typeof createIsometricGrid>, game: GameState, base: GameState["bases"][number], art: GameArt, revealMap: boolean): void {
   const status = base.capture ?? base.captureResult;
   if (!status || (!revealMap && !game.tiles[base.y * game.size + base.x]?.explored && status.faction !== game.playerFaction)) return;
   const { x, y } = tileCenter(grid, base.x, base.y);
-  const complete = !base.capture;
   const ready = Boolean(base.capture && base.capture.readyTurn <= game.turn && status.faction === game.playerFaction);
   const readyUnit = ready ? game.units.find((unit) => unit.id === base.capture?.unitId) : undefined;
   const canCapture = Boolean(readyUnit && !readyUnit.moved && !readyUnit.attacked);
-  const label = complete
-    ? (status.faction === "robots" ? (language === "ru" ? "СОКРАЩЕНИЕ" : "LAYOFF") : (language === "ru" ? "НАНЯТЫ" : "HIRED"))
-    : ready
-      ? (status.faction === "robots" ? (language === "ru" ? "СОКРАЩЕНИЕ" : "LAYOFF") : (language === "ru" ? "ПРИНЯТЬ ОФФЕР" : "ACCEPT OFFER"))
-      : (status.faction === "robots" ? (language === "ru" ? "РЕСТРУКТУРИЗАЦИЯ" : "RESTRUCTURING") : (language === "ru" ? "СОБЕСЕДОВАНИЕ" : "INTERVIEW IN PROGRESS"));
-  const scale = Math.max(12, grid.tileWidth * 0.8);
-  const bob = canCapture ? Math.sin(performance.now() / 400) * grid.tileHeight * 0.15 : 0;
+  const scale = Math.max(15, grid.tileWidth * 1.15);
   const icon = new Sprite(status.faction === "robots" ? art.robotLayoff : art.hrNegotiation);
   icon.anchor.set(0.5, 1);
-  icon.position.set(x, y - grid.tileHeight * 2.4 + bob);
-  fitSprite(icon, scale * 1.5, scale * 1.5);
+  const iconX = x + grid.tileWidth * 0.48;
+  const iconY = y - grid.tileHeight * 1.45;
+  icon.position.set(iconX, iconY);
+  fitSprite(icon, scale, scale);
   if (canCapture) icon.filters = [outline()];
   root.addChild(icon);
-  const text = new Text({ text: label, resolution: Math.max(3, (window.devicePixelRatio || 1) * 2.2), style: { fontFamily: "Arial", fontWeight: "bold", fontSize: Math.max(9, grid.tileWidth * 0.28), fill: 0xffffff, stroke: { color: 0x182043, width: 3 } } });
-  text.anchor.set(0.5, 1);
-  text.position.set(x, y - grid.tileHeight * 2.35 + bob);
-  root.addChild(text);
 }
 
 function getUnitTexture(art: GameArt, unit: Unit): Texture {
-  if (unit.kind === "courier") return unit.gender === "male" ? art.courierMan : art.courier;
-  if (unit.kind === "drone") return art.robotDrone;
-  if (unit.kind === "vacuum") return art.robotVacuum;
-  if (unit.faction === "robots") return art.robotWorker;
-  if (unit.kind === "senior") return art.seniorHipster;
-  if (unit.kind === "middle") return unit.id.length % 2 === 0 ? art.hipsterWomanAlt : art.seniorHipster;
-  return unit.id.length % 2 === 0 ? art.hipsterWoman : art.hipsterMan;
+  return art[unitArtKey(unit)];
 }
 
 function unitAnchorY(unit: Unit): number {
-  if (unit.kind === "courier") return 1;
-  if (unit.kind === "workerBot") return 471 / 512;
-  if (unit.kind === "drone") return 345 / 512;
-  if (unit.kind === "vacuum") return 450 / 512;
   return 1;
 }
 
@@ -379,7 +354,7 @@ function drawUnit(
   const character = new Sprite(getUnitTexture(art, unit));
   character.anchor.set(0.5, unitAnchorY(unit));
   character.position.set(x, y);
-  fitSprite(character, size * 1.35, unitTileHeight * 2.8);
+  fitSprite(character, size * 0.88, unitTileHeight * 2.05);
   const canAct = unit.faction === game.playerFaction && hasUnitAction(game, unit);
   if (attackable) character.tint = 0xff5555;
   else if (unit.faction === game.playerFaction && !canAct) character.tint = 0x888888;
@@ -398,7 +373,7 @@ function drawUnit(
   const isHuman = unit.faction === game.playerFaction;
   root.addChild(characterDetails);
   if (!attackable && canAct) character.filters = [outline()];
-  if ((unit.coffeeMovementBoost || unit.coffeeBoostTurn === game.turn) && !unit.moved) {
+  if (unit.coffeeMovementBoost || (unit.coffeeBoostTurn === game.turn && !unit.moved)) {
     const wind = new Graphics();
     for (let i = 0; i < 3; i++) {
       const shift = (performance.now() / 12 + i * size * 0.45) % (size * 1.8);
@@ -435,6 +410,20 @@ type ActiveCombat = { event: CombatEvent; started: number };
 type ActiveResource = { event: ResourceEvent; started: number };
 type ActiveIncome = { event: IncomeEvent; started: number; arrived: number };
 type Transformation = { started: number; previous: Base };
+
+function drawStaticWorld(
+  root: Container,
+  app: Application,
+  game: GameState,
+  art: GameArt,
+  revealMap: boolean,
+): void {
+  root.removeChildren().forEach((child) => child.destroy({ children: true }));
+  const grid = createIsometricGrid(app.screen.width, app.screen.height, game.size);
+  const tiles = [...game.tiles].sort((a, b) => a.x + a.y - b.x - b.y);
+  tiles.forEach((tile, index) => drawTile(root, grid, game, tile, index, art, revealMap));
+  tiles.forEach((tile, index) => drawTileDetails(root, grid, game, tile, index, art, revealMap));
+}
 
 function drawResourceEffect(root: Container, grid: ReturnType<typeof createIsometricGrid>, game: GameState, art: GameArt, active: ActiveResource, now: number): void {
   const progress = (now - active.started) / RESOURCE_DURATION;
@@ -484,7 +473,6 @@ function drawCombat(
   art: GameArt,
   event: CombatEvent,
   progress: number,
-  language: Props["language"],
 ): void {
   const { attacker, defender } = event;
   const melee = attacker.kind !== "courier" && attacker.kind !== "drone" && gridDistance(attacker, defender) === 1;
@@ -517,16 +505,7 @@ function drawCombat(
         root.addChild(spark);
       }
     } else {
-      const nearestEdge = [
-        { distance: defender.x + 1, x: -1, y: defender.y },
-        { distance: game.size - defender.x, x: game.size, y: defender.y },
-        { distance: defender.y + 1, x: defender.x, y: -1 },
-        { distance: game.size - defender.y, x: defender.x, y: game.size },
-      ].sort((a, b) => a.distance - b.distance)[0];
-      const position = {
-        x: defender.x + (nearestEdge.x - defender.x) * progress,
-        y: defender.y + (nearestEdge.y - defender.y) * progress,
-      };
+      const position = fleePosition(attacker, defender, game.size, progress);
       drawUnit(root, grid, defender, game, art, false, position, true, false);
       const location = tileCenter(grid, position.x, position.y);
       const geese = addWorldSprite(root, art.geese, location.x - grid.tileWidth * 0.6, location.y + grid.tileHeight * 0.25, grid.tileWidth * 0.6, grid.tileHeight);
@@ -535,6 +514,16 @@ function drawCombat(
       face.anchor.set(0.5, 1);
       face.position.set(location.x, location.y - grid.tileHeight * 2.7);
       root.addChild(face);
+      for (let i = 0; i < 2; i++) {
+        const tear = new Sprite(art.sweat);
+        const tearProgress = Math.min(1, Math.max(0, (progress - 0.16 - i * 0.12) / 0.5));
+        tear.anchor.set(0.5);
+        tear.position.set(location.x + (i ? 1 : -1) * grid.tileWidth * 0.12,
+          location.y - grid.tileHeight * (2.35 - tearProgress * 0.42));
+        tear.alpha = Math.sin(tearProgress * Math.PI);
+        fitSprite(tear, grid.tileWidth * 0.16, grid.tileHeight * 0.42);
+        root.addChild(tear);
+      }
     }
     return;
   }
@@ -545,14 +534,6 @@ function drawCombat(
   };
   drawUnit(root, grid, defender, game, art, false, defender, true);
   drawUnit(root, grid, attacker, game, art, false, attackerPosition, true);
-  if (event.counterattack) {
-    const point = tileCenter(grid, attacker.x, attacker.y);
-    const caption = new Text({ text: language === "ru" ? "ОТВЕТНЫЙ УДАР" : "COUNTERATTACK", resolution: Math.max(3, (window.devicePixelRatio || 1) * 2.2), style: { fontFamily: "Arial", fontWeight: "bold", fontSize: Math.max(9, grid.tileWidth * 0.25), fill: 0xffffff, stroke: { color: 0x182043, width: 3 } } });
-    caption.anchor.set(0.5, 1);
-    caption.position.set(point.x, point.y - grid.tileHeight * 3);
-    root.addChild(caption);
-  }
-
   const from = unitPlacement(grid, game, attacker, attackerPosition);
   const to = unitPlacement(grid, game, defender);
   const iconSize = Math.max(5, grid.tileWidth * 0.3);
@@ -623,6 +604,7 @@ function drawCombat(
 
 function drawLatest(
   root: Container,
+  world: Container,
   app: Application,
   game: GameState,
   selected: Props["selected"],
@@ -641,12 +623,13 @@ function drawLatest(
   wallet = { x: app.screen.width, y: 0 },
 ): void {
   root.removeChildren().forEach((child) => child.destroy({ children: true }));
+  world.pivot.set(app.screen.width / 2, app.screen.height / 2);
+  world.position.set(app.screen.width / 2 + pan.x, app.screen.height / 2 + pan.y);
+  world.scale.set(zoom);
   root.pivot.set(app.screen.width / 2, app.screen.height / 2);
   root.position.set(app.screen.width / 2 + pan.x, app.screen.height / 2 + pan.y);
   root.scale.set(zoom);
   const grid = createIsometricGrid(app.screen.width, app.screen.height, game.size);
-  const tiles = [...game.tiles].sort((a, b) => a.x + a.y - b.x - b.y);
-  tiles.forEach((tile, index) => drawTile(root, grid, game, tile, index, art, revealMap));
   const city = game.bases.find((base) => base.id === selectedCityId && base.owner === game.playerFaction);
   if (city) {
     for (const tile of game.tiles) {
@@ -673,7 +656,6 @@ function drawLatest(
       root.addChild(outline);
     }
   }
-  tiles.forEach((tile, index) => drawTileDetails(root, grid, game, tile, index, art, revealMap));
   const playerUnit = game.units.find((unit) => unit.id === selectedUnitId && unit.faction === game.playerFaction);
   if (selected) {
     const canMove = !city && playerUnit && !playerUnit.moved && !playerUnit.attacked;
@@ -734,7 +716,7 @@ function drawLatest(
       && candidate.faction === game.playerFaction && candidate.x === coffee.x && candidate.y === coffee.y);
     if (!unit || game.turn < coffee.readyTurn) continue;
     const { x, y } = tileCenter(grid, coffee.x, coffee.y);
-    const icon = addWorldSprite(root, art.icedLatte, x, y - grid.tileHeight * 3 + Math.sin(performance.now() / 400) * grid.tileHeight * 0.15, grid.tileWidth, grid.tileHeight * 2);
+    const icon = addWorldSprite(root, art.icedLatte, x, y - grid.tileHeight * 2, grid.tileWidth, grid.tileHeight * 2);
     icon.filters = [outline()];
   }
   for (const visit of game.coinVisits) {
@@ -742,37 +724,39 @@ function drawLatest(
       && candidate.x === visit.x && candidate.y === visit.y);
     if (!unit || game.turn < visit.readyTurn || unit.moved || unit.attacked) continue;
     const { x, y } = tileCenter(grid, visit.x, visit.y);
-    const icon = addWorldSprite(root, art.treasury, x, y - grid.tileHeight * 3 + Math.sin(performance.now() / 400) * grid.tileHeight * 0.15, grid.tileWidth * 0.65, grid.tileHeight * 1.3);
+    const icon = addWorldSprite(root, art.treasury, x, y - grid.tileHeight * 2, grid.tileWidth * 0.65, grid.tileHeight * 1.3);
     icon.filters = [outline()];
   }
   const selectedInCombat = combat && (selectedUnitId === combat.event.attacker.id || selectedUnitId === combat.event.defender.id);
-  if (combat && !selectedInCombat) drawCombat(root, grid, game, art, combat.event, combat.progress, language);
-  for (const base of game.bases) drawCaptureBadge(root, grid, game, base, art, language, revealMap);
+  if (combat && !selectedInCombat) drawCombat(root, grid, game, art, combat.event, combat.progress);
+  for (const base of game.bases) drawCaptureBadge(root, grid, game, base, art, revealMap);
   for (const base of game.bases) {
     if (!base.owner || (!revealMap && !game.tiles[base.y * game.size + base.x]?.explored && base.owner !== game.playerFaction)) continue;
     const kind = buildingKind(base);
     const layout = buildingLayout(kind, art[kind], grid.tileWidth, grid.tileHeight);
     const { x, y } = tileCenter(grid, base.x, base.y);
-    const count = base.rank < 4 ? progressToNextRank(base.rank) : 4;
+    const count = cityCapacity(base);
+    const occupied = cityOccupancy(game, base);
     const cell = Math.max(4, grid.tileWidth * 0.2), gap = Math.max(1, grid.tileWidth * 0.04);
     const top = y - art[kind].height * layout.scale * layout.anchorY - cell * 1.5;
     const bar = new Graphics();
+    const progress = base.rank >= 4 ? count : base.progress;
     for (let i = 0; i < count; i++) {
-      bar.roundRect(x - (count * cell + (count - 1) * gap) / 2 + i * (cell + gap), top, cell, cell * 0.62, 1)
-        .fill(i < (base.rank >= 4 ? count : base.progress) ? 0xffdc5d : 0x243b4c)
-        .stroke({ color: 0xffffff, width: 0.8 });
-    }
-    const capacity = cityCapacity(base), occupied = cityOccupancy(game, base);
-    for (let i = 0; i < capacity; i++) {
-      bar.circle(x + (i - (capacity - 1) / 2) * (cell + gap), top - cell * 0.65, cell * 0.24)
-        .fill(i < occupied ? 0x70e8ff : 0x243b4c).stroke({ color: 0xffffff, width: 0.6 });
+      const cellX = x - (count * cell + (count - 1) * gap) / 2 + i * (cell + gap);
+      bar.roundRect(cellX, top, cell, cell * 0.62, 1)
+        .fill(0x243b4c).stroke({ color: 0xffffff, width: 0.8 });
+      bar.circle(cellX + cell / 2, top + cell * 0.31, cell * 0.17)
+        .fill(i < occupied ? 0xffdc5d : 0x132331)
+        .stroke({ color: i < occupied ? 0xfff0a3 : 0x7d8b8b, width: 0.6 });
+      bar.roundRect(cellX + cell * 0.12, top + cell * 0.49, cell * 0.76, cell * 0.09, 1)
+        .fill(i < progress ? 0xffdc5d : 0x132331);
     }
     root.addChild(bar);
   }
   if (playerUnit && (!combat || (playerUnit.id !== combat.event.attacker.id && playerUnit.id !== combat.event.defender.id))) {
     drawUnit(root, grid, playerUnit, game, art, false, animatedPositions.get(playerUnit.id), revealMap);
   }
-  if (combat && selectedInCombat) drawCombat(root, grid, game, art, combat.event, combat.progress, language);
+  if (combat && selectedInCombat) drawCombat(root, grid, game, art, combat.event, combat.progress);
   for (const resource of activeResources) drawResourceEffect(root, grid, game, art, resource, performance.now());
   for (const income of activeIncome) drawIncomeEffect(root, grid, income, wallet, performance.now());
 }
@@ -781,6 +765,7 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
   const hostRef = useRef<HTMLDivElement>(null);
   const appRef = useRef<Application | null>(null);
   const rootRef = useRef<Container | null>(null);
+  const worldRef = useRef<Container | null>(null);
   const callbackRef = useRef(onTileClick);
   const coffeeRef = useRef(onSelectCoffee);
   const incomeArrivedRef = useRef(onIncomeArrived);
@@ -798,10 +783,12 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
   const artRef = useRef<GameArt | null>(null);
   const zoomRef = useRef(1.35);
   const zoomSetterRef = useRef<(zoom: number) => void>(() => undefined);
+  const drawRef = useRef<() => void>(() => undefined);
   const previousUnitsRef = useRef(new Map<string, { x: number; y: number }>());
+  const previousUnitBoostsRef = useRef(new Map<string, boolean>());
   const previousBasesRef = useRef(new Map<string, Base>());
   const transformationsRef = useRef(new Map<string, Transformation>());
-  const animationsRef = useRef(new Map<string, { from: { x: number; y: number }; to: { x: number; y: number }; path?: Array<{ x: number; y: number }>; started: number }>());
+  const animationsRef = useRef(new Map<string, { from: { x: number; y: number }; to: { x: number; y: number }; path?: Array<{ x: number; y: number }>; started: number; duration?: number }>());
   const lastMovementIdRef = useRef(0);
   const combatQueueRef = useRef<CombatEvent[]>([]);
   const activeCombatRef = useRef<ActiveCombat | null>(null);
@@ -813,9 +800,13 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
   const activeIncomeRef = useRef<ActiveIncome[]>([]);
   const panRef = useRef({ x: 0, y: 0 });
   const cameraRef = useRef<{ id: number; from: { x: number; y: number }; to: { x: number; y: number }; started: number } | null>(null);
-  const dragRef = useRef<{ x: number; y: number; panX: number; panY: number; moved: boolean } | null>(null);
+  const dragRef = useRef<{ pointerId: number; x: number; y: number; panX: number; panY: number; moved: boolean } | null>(null);
+  const pointerPositionsRef = useRef(new Map<number, { x: number; y: number }>());
+  const pinchStartRef = useRef<{ distance: number; zoom: number; world: { x: number; y: number } } | null>(null);
   const [zoom, setZoom] = useState(1.35);
   const [ready, setReady] = useState(false);
+  const [loadingProgress, setLoadingProgress] = useState(0);
+  const [loadingError, setLoadingError] = useState<string | null>(null);
   const [clouds] = useState(() => Array.from({ length: 6 }, () => ({
     top: `${Math.round(Math.random() * 85)}%`,
     width: `${10 + Math.round(Math.random() * 10)}%`,
@@ -838,7 +829,13 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
   useEffect(() => { revealMapRef.current = revealMap; }, [revealMap]);
   useEffect(() => { gameRef.current = game; }, [game]);
   useEffect(() => { zoomRef.current = zoom; }, [zoom]);
-  useEffect(() => { zoomSetterRef.current = setZoom; }, []);
+  useEffect(() => {
+    zoomSetterRef.current = (nextZoom) => {
+      zoomRef.current = nextZoom;
+      setZoom(nextZoom);
+      drawRef.current();
+    };
+  }, []);
 
   useEffect(() => {
     const app = appRef.current;
@@ -854,10 +851,33 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
   }, [focusTarget, ready]);
 
   useEffect(() => {
+    const world = worldRef.current;
+    const app = appRef.current;
+    const art = artRef.current;
+    if (ready && world && app && art) drawStaticWorld(world, app, game, art, revealMap);
+  }, [game, ready, revealMap]);
+
+  useEffect(() => {
     const incoming = combatEvents.filter((event) => event.id > lastCombatIdRef.current);
     if (incoming.length) {
       combatQueueRef.current.push(...incoming);
       lastCombatIdRef.current = incoming[incoming.length - 1].id;
+      const lethal = [...incoming].reverse().find((event) => event.lethal);
+      const app = appRef.current;
+      if (lethal && app) {
+        const target = lethal.counterattack ? lethal.attacker : lethal.defender;
+        const grid = createIsometricGrid(app.screen.width, app.screen.height, gameRef.current.size);
+        const center = tileCenter(grid, target.x, target.y);
+        cameraRef.current = {
+          id: 0,
+          from: { ...panRef.current },
+          to: {
+            x: (app.screen.width / 2 - center.x) * zoomRef.current,
+            y: (app.screen.height / 2 - center.y) * zoomRef.current,
+          },
+          started: performance.now(),
+        };
+      }
     }
   }, [combatEvents]);
 
@@ -879,15 +899,23 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
 
   useEffect(() => {
     const previous = previousUnitsRef.current;
+    const previousBoosts = previousUnitBoostsRef.current;
     const now = performance.now();
     for (const unit of game.units) {
       const oldPosition = previous.get(unit.id);
       const combatAdvance = combatEvents.some((event) => event.id > lastPositionCombatIdRef.current && event.advance && event.attacker.id === unit.id);
       if (!combatAdvance && unit.faction === game.playerFaction && oldPosition && (oldPosition.x !== unit.x || oldPosition.y !== unit.y)) {
         animationsRef.current.set(unit.id, { from: oldPosition, to: { x: unit.x, y: unit.y }, started: now });
+      } else if (unit.coffeeMovementBoost && !previousBoosts.get(unit.id)) {
+        animationsRef.current.set(unit.id, {
+          from: { x: unit.x, y: unit.y },
+          to: { x: unit.x, y: unit.y },
+          started: now,
+          duration: 900,
+        });
       }
     }
-    let start = Math.max(now, ...Array.from(animationsRef.current.values(), (animation) => animation.started + 220));
+    let start = Math.max(now, ...Array.from(animationsRef.current.values(), (animation) => animation.duration ? now : animation.started + 220));
     const incoming = movementEvents.filter((event) => event.id > lastMovementIdRef.current);
     for (const event of incoming) {
       if (game.units.some((unit) => unit.id === event.unitId)) {
@@ -897,6 +925,7 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
       lastMovementIdRef.current = event.id;
     }
     previousUnitsRef.current = new Map(game.units.map((unit) => [unit.id, { x: unit.x, y: unit.y }]));
+    previousUnitBoostsRef.current = new Map(game.units.map((unit) => [unit.id, unit.coffeeMovementBoost ?? false]));
     if (combatEvents.length) lastPositionCombatIdRef.current = combatEvents[combatEvents.length - 1].id;
     for (const base of game.bases) {
       const previous = previousBasesRef.current.get(base.id);
@@ -912,14 +941,26 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
     if (!host) return;
     let active = true;
     let root: Container | null = null;
+    let world: Container | null = null;
     const app = new Application();
 
     const draw = () => {
       const currentRoot = rootRef.current;
+      const currentWorld = worldRef.current;
       const currentApp = appRef.current;
-      if (currentRoot && currentApp && artRef.current) {
-        drawLatest(currentRoot, currentApp, gameRef.current, selectedRef.current, selectedUnitIdRef.current, artRef.current, zoomRef.current, new Map(), panRef.current, undefined, selectedCityIdRef.current, languageRef.current, transformationsRef.current, revealMapRef.current);
+      if (currentRoot && currentWorld && currentApp && artRef.current) {
+        drawLatest(currentRoot, currentWorld, currentApp, gameRef.current, selectedRef.current, selectedUnitIdRef.current, artRef.current, zoomRef.current, new Map(), panRef.current, undefined, selectedCityIdRef.current, languageRef.current, transformationsRef.current, revealMapRef.current);
       }
+    };
+    drawRef.current = draw;
+
+    const drawAll = () => {
+      const currentWorld = worldRef.current;
+      const currentApp = appRef.current;
+      if (currentWorld && currentApp && artRef.current) {
+        drawStaticWorld(currentWorld, currentApp, gameRef.current, artRef.current, revealMapRef.current);
+      }
+      draw();
     };
 
     const handleClick = (event: PointerEvent) => {
@@ -945,7 +986,7 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
           && candidate.x === entry.x && candidate.y === entry.y && !candidate.moved && !candidate.attacked);
         if (!unit || entry.readyTurn > currentGame.turn) return false;
         const { x, y } = tileCenter(grid, entry.x, entry.y);
-        const bottom = y - grid.tileHeight * 3 + Math.sin(performance.now() / 400) * grid.tileHeight * 0.15;
+        const bottom = y - grid.tileHeight * 2;
         return Math.abs(unscaledPoint.x - x) <= grid.tileWidth / 2
           && unscaledPoint.y >= bottom - grid.tileHeight * 2 && unscaledPoint.y <= bottom;
       });
@@ -959,7 +1000,7 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
           && candidate.faction === currentGame.playerFaction && candidate.x === entry.x && candidate.y === entry.y);
         if (!unit) return false;
         const { x, y } = tileCenter(grid, entry.x, entry.y);
-        const bottom = y - grid.tileHeight * 3 + Math.sin(performance.now() / 400) * grid.tileHeight * 0.15;
+        const bottom = y - grid.tileHeight * 2;
         return Math.abs(unscaledPoint.x - x) <= grid.tileWidth / 2
           && unscaledPoint.y >= bottom - grid.tileHeight * 2 && unscaledPoint.y <= bottom;
       });
@@ -973,11 +1014,12 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
           && candidate.x === base.x && candidate.y === base.y);
         if (!unit || unit.moved || unit.attacked) return false;
         const { x, y } = tileCenter(grid, base.x, base.y);
-        const scale = Math.max(12, grid.tileWidth * 0.8) * 1.5;
-        const bob = Math.sin(performance.now() / 400) * grid.tileHeight * 0.15;
-        return Math.abs(unscaledPoint.x - x) <= Math.max(scale / 2, grid.tileWidth * 1.8)
-          && unscaledPoint.y >= y - grid.tileHeight * 2.4 - scale + bob
-          && unscaledPoint.y <= y - grid.tileHeight * 2.35 + bob;
+        const scale = Math.max(15, grid.tileWidth * 1.15);
+        const iconX = x + grid.tileWidth * 0.48;
+        const bottom = y - grid.tileHeight * 1.45;
+        return Math.abs(unscaledPoint.x - iconX) <= scale * 0.58
+          && unscaledPoint.y >= bottom - scale * 1.13
+          && unscaledPoint.y <= bottom;
       });
       if (capture?.capture) {
         captureRef.current(capture.id, capture.capture.unitId);
@@ -1030,17 +1072,64 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
     const handlePointerDown = (event: PointerEvent) => {
       if (event.button !== 0) return;
       app.canvas.setPointerCapture(event.pointerId);
-      dragRef.current = {
-        x: event.clientX,
-        y: event.clientY,
-        panX: panRef.current.x,
-        panY: panRef.current.y,
-        moved: false,
+      pointerPositionsRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (pointerPositionsRef.current.size === 1) {
+        dragRef.current = {
+          pointerId: event.pointerId,
+          x: event.clientX,
+          y: event.clientY,
+          panX: panRef.current.x,
+          panY: panRef.current.y,
+          moved: false,
+        };
+        return;
+      }
+      dragRef.current = null;
+      const points = [...pointerPositionsRef.current.values()];
+      const first = points[0], second = points[1];
+      const center = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
+      const rect = app.canvas.getBoundingClientRect();
+      const screenCenter = { x: app.screen.width / 2, y: app.screen.height / 2 };
+      const screenPoint = {
+        x: (center.x - rect.left) * app.screen.width / rect.width,
+        y: (center.y - rect.top) * app.screen.height / rect.height,
+      };
+      pinchStartRef.current = {
+        distance: Math.hypot(second.x - first.x, second.y - first.y),
+        zoom: zoomRef.current,
+        world: {
+          x: (screenPoint.x - screenCenter.x - panRef.current.x) / zoomRef.current + screenCenter.x,
+          y: (screenPoint.y - screenCenter.y - panRef.current.y) / zoomRef.current + screenCenter.y,
+        },
       };
     };
     const handlePointerMove = (event: PointerEvent) => {
+      if (!pointerPositionsRef.current.has(event.pointerId)) return;
+      pointerPositionsRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (pointerPositionsRef.current.size >= 2 && pinchStartRef.current) {
+        const points = [...pointerPositionsRef.current.values()].slice(0, 2);
+        const first = points[0], second = points[1];
+        const center = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
+        const rect = app.canvas.getBoundingClientRect();
+        const screenCenter = { x: app.screen.width / 2, y: app.screen.height / 2 };
+        const screenPoint = {
+          x: (center.x - rect.left) * app.screen.width / rect.width,
+          y: (center.y - rect.top) * app.screen.height / rect.height,
+        };
+        const maximum = window.matchMedia("(max-width: 720px)").matches ? 16 : 3.5;
+        const nextZoom = Math.min(maximum, Math.max(0.8, pinchStartRef.current.zoom
+          * Math.hypot(second.x - first.x, second.y - first.y) / Math.max(1, pinchStartRef.current.distance)));
+        zoomRef.current = nextZoom;
+        setZoom(nextZoom);
+        panRef.current = {
+          x: screenPoint.x - screenCenter.x - (pinchStartRef.current.world.x - screenCenter.x) * nextZoom,
+          y: screenPoint.y - screenCenter.y - (pinchStartRef.current.world.y - screenCenter.y) * nextZoom,
+        };
+        draw();
+        return;
+      }
       const drag = dragRef.current;
-      if (!drag || !(event.buttons & 1)) return;
+      if (!drag || drag.pointerId !== event.pointerId) return;
       const dx = event.clientX - drag.x;
       const dy = event.clientY - drag.y;
       if (!drag.moved && Math.hypot(dx, dy) < 4) return;
@@ -1048,12 +1137,36 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
       panRef.current = { x: drag.panX + dx, y: drag.panY + dy };
       draw();
     };
-    const handlePointerCancel = () => { dragRef.current = null; };
+    const handlePointerUp = (event: PointerEvent) => {
+      const wasPinching = pinchStartRef.current !== null;
+      if (!wasPinching && pointerPositionsRef.current.size === 1) handleClick(event);
+      pointerPositionsRef.current.delete(event.pointerId);
+      if (pointerPositionsRef.current.size < 2) pinchStartRef.current = null;
+      const remaining = [...pointerPositionsRef.current.entries()][0];
+      if (remaining) {
+        dragRef.current = {
+          pointerId: remaining[0],
+          x: remaining[1].x,
+          y: remaining[1].y,
+          panX: panRef.current.x,
+          panY: panRef.current.y,
+          moved: true,
+        };
+      } else {
+        dragRef.current = null;
+      }
+    };
+    const handlePointerCancel = (event: PointerEvent) => {
+      pointerPositionsRef.current.delete(event.pointerId);
+      pinchStartRef.current = null;
+      dragRef.current = null;
+    };
 
     const handleWheel = (event: WheelEvent) => {
       event.preventDefault();
       if (event.ctrlKey || event.metaKey) {
-        zoomSetterRef.current(Math.min(2.2, Math.max(1, zoomRef.current + (event.deltaY < 0 ? 0.1 : -0.1))));
+        const maximum = window.matchMedia("(max-width: 720px)").matches ? 16 : 3.5;
+        zoomSetterRef.current(Math.min(maximum, Math.max(0.8, zoomRef.current + (event.deltaY < 0 ? 0.1 : -0.1))));
       } else {
         const factor = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? app.screen.height : 1;
         panRef.current = { x: panRef.current.x - event.deltaX * factor, y: panRef.current.y - event.deltaY * factor };
@@ -1062,18 +1175,21 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
     };
 
     const initialize = async () => {
+      const mobile = window.matchMedia("(max-width: 720px)").matches;
       await app.init({
         resizeTo: host,
         backgroundAlpha: 0,
+        resolution: Math.min(window.devicePixelRatio || 1, mobile ? 2.25 : 2.5),
         antialias: true,
-        resolution: window.devicePixelRatio || 1,
         autoDensity: true,
       });
       if (!active) {
         app.destroy(true, { children: true });
         return;
       }
-      const art = await loadGameArt();
+      const art = await loadGameArt((progress) => {
+        if (active) setLoadingProgress(progress);
+      });
       if (!active) {
         app.destroy(true, { children: true });
         return;
@@ -1081,55 +1197,72 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
       artRef.current = art;
       appRef.current = app;
       host.appendChild(app.canvas);
+      app.ticker.maxFPS = mobile ? 24 : 30;
+      world = new Container();
       root = new Container();
-      app.stage.addChild(root);
+      app.stage.addChild(world, root);
+      worldRef.current = world;
       rootRef.current = root;
+      const initialZoom = initialMapZoom(
+        createIsometricGrid(app.screen.width, app.screen.height, gameRef.current.size),
+        mobile,
+      );
+      zoomRef.current = initialZoom;
+      setZoom(initialZoom);
+      const startUnit = gameRef.current.units.find((unit) => unit.faction === gameRef.current.playerFaction);
+      if (startUnit) {
+        const grid = createIsometricGrid(app.screen.width, app.screen.height, gameRef.current.size);
+        const center = tileCenter(grid, startUnit.x, startUnit.y);
+        panRef.current = {
+          x: (app.screen.width / 2 - center.x) * initialZoom,
+          y: (app.screen.height / 2 - center.y) * initialZoom,
+        };
+      }
       app.canvas.setAttribute("aria-label", "Яркая изометрическая карта. Нажмите на клетку, чтобы выбрать или переместить фигуру.");
-      app.canvas.addEventListener("pointerup", handleClick);
+      app.canvas.addEventListener("pointerup", handlePointerUp);
       app.canvas.addEventListener("pointerdown", handlePointerDown);
       app.canvas.addEventListener("pointermove", handlePointerMove);
       app.canvas.addEventListener("pointercancel", handlePointerCancel);
       host.addEventListener("wheel", handleWheel, { passive: false });
-      draw();
+      drawAll();
       setReady(true);
     };
 
     initialize().catch((error: unknown) => {
-      if (active) host.dataset.error = error instanceof Error ? `Не удалось загрузить игровой ресурс: ${error.message}` : "Не удалось загрузить игровые ресурсы.";
+      if (active) {
+        const message = error instanceof Error ? `Не удалось загрузить игровой ресурс: ${error.message}` : "Не удалось загрузить игровые ресурсы.";
+        host.dataset.error = message;
+        setLoadingError(message);
+      }
     });
-    const observer = new ResizeObserver(draw);
+    const observer = new ResizeObserver(drawAll);
     observer.observe(host);
     return () => {
       active = false;
       observer.disconnect();
       host.removeEventListener("wheel", handleWheel);
       if (appRef.current) {
-        appRef.current.canvas.removeEventListener("pointerup", handleClick);
+        appRef.current.canvas.removeEventListener("pointerup", handlePointerUp);
         appRef.current.canvas.removeEventListener("pointerdown", handlePointerDown);
         appRef.current.canvas.removeEventListener("pointermove", handlePointerMove);
         appRef.current.canvas.removeEventListener("pointercancel", handlePointerCancel);
         appRef.current.destroy(true, { children: true });
         appRef.current = null;
         rootRef.current = null;
+        worldRef.current = null;
         artRef.current = null;
       }
+      drawRef.current = () => undefined;
     };
   }, []);
 
   useEffect(() => {
     const root = rootRef.current;
+    const world = worldRef.current;
     const app = appRef.current;
-    if (!root || !app) return;
-    const attacker = game.units.find((unit) => unit.id === selectedUnitId && unit.faction === game.playerFaction);
-    const lethal = Boolean(attacker && game.units.some((target) => canAttack(game, attacker, target) && damage(attacker, target, game) >= target.hp));
-    const idleAnimation = game.status === "running" && game.units.some((unit) => unit.faction === game.playerFaction && (
-      ((unit.coffeeMovementBoost || unit.coffeeBoostTurn === game.turn) && !unit.moved)
-      || game.coffeeBreaks.some((entry) => entry.unitId === unit.id && entry.readyTurn <= game.turn && entry.x === unit.x && entry.y === unit.y)
-      || game.coinVisits.some((entry) => entry.unitId === unit.id && entry.readyTurn <= game.turn && entry.x === unit.x && entry.y === unit.y && !unit.moved && !unit.attacked)
-      || game.bases.some((base) => base.capture?.unitId === unit.id && base.capture.readyTurn <= game.turn && !unit.moved && !unit.attacked)
-    ));
-    if (!cameraRef.current && !animationsRef.current.size && !combatQueueRef.current.length && !activeCombatRef.current && !transformationsRef.current.size && !activeResourcesRef.current.length && !activeIncomeRef.current.length && !lethal && !idleAnimation) {
-      if (artRef.current) drawLatest(root, app, game, selected, selectedUnitId, artRef.current, zoom, new Map(), panRef.current, undefined, selectedCityId, language, new Map(), revealMap);
+    if (!root || !world || !app) return;
+    if (!cameraRef.current && !animationsRef.current.size && !combatQueueRef.current.length && !activeCombatRef.current && !transformationsRef.current.size && !activeResourcesRef.current.length && !activeIncomeRef.current.length) {
+      if (artRef.current) drawLatest(root, world, app, game, selected, selectedUnitId, artRef.current, zoomRef.current, new Map(), panRef.current, undefined, selectedCityId, language, new Map(), revealMap);
       if (game.status !== "running") animationsFinishedRef.current();
       return;
     }
@@ -1174,7 +1307,7 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
       const combat = activeCombat ? { event: activeCombat.event, progress: Math.min(1, (now - activeCombat.started) / COMBAT_DURATION) } : undefined;
       const positions = new Map<string, { x: number; y: number }>();
       for (const [id, animation] of animationsRef.current) {
-        const progress = Math.max(0, Math.min(1, (now - animation.started) / 220));
+        const progress = Math.max(0, Math.min(1, (now - animation.started) / (animation.duration ?? 220)));
         const eased = 1 - (1 - progress) ** 3;
         const path = animation.path ?? [animation.to];
         const step = Math.min(path.length - 1, Math.floor(eased * path.length));
@@ -1193,28 +1326,36 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
         x: ((walletRect.left + walletRect.width / 2 - hostRect.left) * app.screen.width / hostRect.width - app.screen.width / 2 - panRef.current.x) / zoomRef.current + app.screen.width / 2,
         y: ((walletRect.top + walletRect.height / 2 - hostRect.top) * app.screen.height / hostRect.height - app.screen.height / 2 - panRef.current.y) / zoomRef.current + app.screen.height / 2,
       } : { x: app.screen.width, y: 0 };
-      if (artRef.current) drawLatest(root, app, gameRef.current, selectedRef.current, selectedUnitIdRef.current, artRef.current, zoomRef.current, positions, panRef.current, combat, selectedCityIdRef.current, languageRef.current, transformationsRef.current, revealMapRef.current, activeResourcesRef.current, activeIncomeRef.current, wallet);
+      if (artRef.current) drawLatest(root, world, app, gameRef.current, selectedRef.current, selectedUnitIdRef.current, artRef.current, zoomRef.current, positions, panRef.current, combat, selectedCityIdRef.current, languageRef.current, transformationsRef.current, revealMapRef.current, activeResourcesRef.current, activeIncomeRef.current, wallet);
       if (combat?.progress === 1) activeCombatRef.current = null;
       if (gameRef.current.status !== "running" && !animationsRef.current.size && !combatQueueRef.current.length && !activeCombatRef.current && !transformationsRef.current.size && !activeResourcesRef.current.length && !activeIncomeRef.current.length) {
         animationsFinishedRef.current();
       }
-      if (!cameraRef.current && !animationsRef.current.size && !combatQueueRef.current.length && !activeCombatRef.current && !transformationsRef.current.size && !activeResourcesRef.current.length && !activeIncomeRef.current.length && !lethal && !idleAnimation) {
-        if (artRef.current) drawLatest(root, app, gameRef.current, selectedRef.current, selectedUnitIdRef.current, artRef.current, zoomRef.current, positions, panRef.current, undefined, selectedCityIdRef.current, languageRef.current, new Map(), revealMapRef.current);
+      if (!cameraRef.current && !animationsRef.current.size && !combatQueueRef.current.length && !activeCombatRef.current && !transformationsRef.current.size && !activeResourcesRef.current.length && !activeIncomeRef.current.length) {
+        if (artRef.current) drawLatest(root, world, app, gameRef.current, selectedRef.current, selectedUnitIdRef.current, artRef.current, zoomRef.current, positions, panRef.current, undefined, selectedCityIdRef.current, languageRef.current, new Map(), revealMapRef.current);
         app.ticker.remove(tick);
       }
     };
     app.ticker.add(tick);
     return () => { if (appRef.current === app) app.ticker.remove(tick); };
-  }, [game, selected, selectedUnitId, selectedCityId, language, zoom, combatEvents, resourceEvents, incomeEvents, ready, revealMap, focusTarget]);
+  }, [game, selected, selectedUnitId, selectedCityId, language, combatEvents, resourceEvents, incomeEvents, ready, revealMap, focusTarget]);
 
   return <div className="map-canvas" ref={hostRef}>
     <div className="cloud-sky" aria-hidden="true">
       {clouds.map((cloud, index) => <img key={index} className="server-cloud" style={cloud} src="game-art/world/cloud-server.png" alt="" />)}
     </div>
-    <div className="map-zoom-controls" aria-label="Map zoom">
-      <button type="button" aria-label="Zoom out" onClick={() => setZoom((value) => Math.max(1, Number((value - 0.1).toFixed(1))))}>−</button>
-      <span>{Math.round(zoom * 100)}%</span>
-      <button type="button" aria-label="Zoom in" onClick={() => setZoom((value) => Math.min(2.2, Number((value + 0.1).toFixed(1))))}>+</button>
-    </div>
+    {!ready && <div className="map-loader" role="status" aria-live="polite">
+      {loadingError ? <>
+        <strong>{language === "ru" ? "Не удалось загрузить карту" : "Map failed to load"}</strong>
+        <span>{loadingError}</span>
+      </> : <>
+        <span className="map-loader-icon" aria-hidden="true">▧</span>
+        <strong>{language === "ru" ? "Готовим игровое поле" : "Preparing the game world"}</strong>
+        <div className="map-loader-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(loadingProgress * 100)}>
+          <span style={{ width: `${Math.round(loadingProgress * 100)}%` }} />
+        </div>
+        <small>{Math.round(loadingProgress * 100)}%</small>
+      </>}
+    </div>}
   </div>;
 }

@@ -21,6 +21,26 @@ export function createIsometricGrid(width: number, height: number, size: number)
   };
 }
 
+export function initialMapZoom(grid: IsometricGrid, mobile: boolean): number {
+  if (!mobile) return 1.35;
+  return Math.min(16, Math.max(1.35, 150 / (grid.tileWidth * 2)));
+}
+
+export function fleePosition(attacker: Point, defender: Point, size: number, progress: number): Point {
+  const directionX = defender.x - attacker.x;
+  const directionY = defender.y - attacker.y;
+  if (directionX === 0 && directionY === 0) return defender;
+  const exitDistance = Math.min(
+    directionX > 0 ? (size - defender.x) / directionX : directionX < 0 ? (-1 - defender.x) / directionX : Infinity,
+    directionY > 0 ? (size - defender.y) / directionY : directionY < 0 ? (-1 - defender.y) / directionY : Infinity,
+  );
+  const distance = exitDistance * Math.max(0, Math.min(1, progress));
+  return {
+    x: defender.x + directionX * distance,
+    y: defender.y + directionY * distance,
+  };
+}
+
 export function tileCenter(grid: IsometricGrid, x: number, y: number): Point {
   return {
     x: grid.width / 2 + (x - y) * grid.tileWidth,

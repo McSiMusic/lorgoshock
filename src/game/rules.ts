@@ -121,7 +121,7 @@ export function resourceProgress(tile: Tile): number {
 export function canBuildBridge(state: GameState, base: Base, tile: Tile, axis: "x" | "y", faction: Faction = state.playerFaction): boolean {
   if ((axis !== "x" && axis !== "y") || state.status !== "running" || base.owner !== faction || base.capture || tile.terrain !== "water"
     || tile.poi || tile.bridge || (faction === state.playerFaction && !tile.explored)
-    || !canHarvestWithinCity(base, tile) || state.tokens[faction] < 5
+    || state.tokens[faction] < 5
     || state.bases.some((city) => city.x === tile.x && city.y === tile.y)
     || state.units.some((unit) => unit.x === tile.x && unit.y === tile.y)) return false;
   const dx = axis === "x" ? 1 : 0;

@@ -640,6 +640,22 @@ describe("game worker commands", () => {
     expect(worker.send({ type: "BUILD_BRIDGE", baseId: base.id, x: 6, y: 5 }).type).toBe("ERROR");
   });
 
+  it("allows a company to build a bridge outside its resource area", async () => {
+    const worker = await createWorker();
+    const game = worker.send({ type: "START", seed: "bridge-outside-city", size: 16, faction: "lorgoshki" }).state!;
+    const base = game.bases[0];
+    Object.assign(base, { x: 2, y: 2 });
+    const tile = game.tiles[8 * game.size + 8];
+    Object.assign(tile, { terrain: "water", poi: null, explored: true });
+    game.tiles[8 * game.size + 7].terrain = "plain";
+    game.tiles[8 * game.size + 9].terrain = "plain";
+    game.tokens.lorgoshki = 5;
+
+    expect(worker.send({ type: "BUILD_BRIDGE", baseId: base.id, x: 8, y: 8 }).type).toBe("STATE");
+    expect(tile.bridge).toEqual({ axis: "x", faction: "lorgoshki" });
+    expect(game.tokens.lorgoshki).toBe(0);
+  });
+
   it("automatically picks the available shore axis and rejects isolated water", async () => {
     const worker = await createWorker();
     const game = worker.send({ type: "START", seed: "bridge-automatic", size: 16, faction: "lorgoshki" }).state!;
