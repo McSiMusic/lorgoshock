@@ -4,6 +4,7 @@ export const BOT_FOCUS_DURATION = 700;
 export const COMBAT_DURATION = 700;
 export const RESOURCE_DURATION = 1700;
 export const RESOURCE_ARRIVAL = RESOURCE_DURATION * 0.93;
+export const FOG_REVEAL_DURATION = 700;
 
 export function resourceStarProgress(elapsed: number, index: number): number {
   const start = RESOURCE_DURATION * (0.48 + index * 0.04);
@@ -27,6 +28,11 @@ export function incomeCoinAmount(amount: number, index: number): number {
 
 export function incomeCoinProgress(elapsed: number, index: number): number {
   return Math.max(0, Math.min(1, (elapsed / INCOME_DURATION - index * 0.06) / 0.7));
+}
+
+export function fogRevealAlpha(elapsed: number): number {
+  const progress = Math.max(0, Math.min(1, elapsed / FOG_REVEAL_DURATION));
+  return (1 - progress) ** 3;
 }
 
 export function transformationFrame(elapsed: number): { previous: boolean; shake: number; flash: number } {

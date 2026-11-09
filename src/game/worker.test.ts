@@ -28,6 +28,15 @@ async function createWorker() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("game worker commands", () => {
+  it("restores a saved 8×8 map", async () => {
+    const worker = await createWorker();
+    const snapshot = worker.send({ type: "START", seed: "save-test-small-map", size: 8, faction: "lorgoshki" }).state!;
+    expect(snapshot.tiles).toHaveLength(64);
+    expect(savedGameSchema.parse(snapshot)).toEqual(snapshot);
+    const restoredWorker = await createWorker();
+    expect(restoredWorker.send({ type: "RESUME", state: snapshot }).state).toEqual(snapshot);
+  });
+
   it("restores the full saved state and continues without replaying old notifications", async () => {
     const worker = await createWorker();
     const started = worker.send({ type: "START", seed: "save-test", size: 16, faction: "lorgoshki" });

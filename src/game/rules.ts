@@ -224,7 +224,7 @@ export function shortestPath(
       if (!inBounds(x, y, state.size) || !tile || (tile.terrain === "water" && !tile.bridge)) continue;
       const currentTile = state.tiles[current.y * state.size + current.x];
       const permits = (bridge: Tile["bridge"]) => !bridge || (bridge.axis === "x" ? dy === 0 && Math.abs(dx) === 1 : dx === 0 && Math.abs(dy) === 1);
-      if (!permits(currentTile?.bridge) || !permits(tile.bridge)) continue;
+      if (!permits(currentTile?.bridge)) continue;
       const next = key(x, y);
       if (previous.has(next)) continue;
       previous.set(next, key(current.x, current.y));

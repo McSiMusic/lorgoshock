@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Provider, useDispatch, useSelector } from "react-redux";
-import { MAP_SIZES, UNIT_BY_TIER, UNIT_DEFINITIONS, type BotAction, type CombatEvent, type Faction, type GameCommand, type GameEvent, type GameState, type IncomeEvent, type MovementEvent, type ResourceEvent, type UnitKind } from "../game/model";
+import { DEFAULT_MAP_SIZE, MAP_SIZES, UNIT_BY_TIER, UNIT_DEFINITIONS, type BotAction, type CombatEvent, type Faction, type GameCommand, type GameEvent, type GameState, type IncomeEvent, type MovementEvent, type ResourceEvent, type UnitKind } from "../game/model";
 import { COMBAT_DURATION, RESOURCE_DURATION, TRANSFORMATION_DURATION } from "../game/animation";
 import { SAVE_KEY, savedGameSchema } from "../game/save";
 import { attackRange, bridgeAxis, canAttack, canHarvest, canHarvestWithinCity, canMoveTo, cityCapacity, cityOccupancy, effectiveAttack, hasUnitAction, healingAmount, hireCost, incomeForRank, progressToNextRank, resourceCity as findResourceCity, resourceCost, resourceProgress } from "../game/rules";
@@ -134,7 +134,7 @@ function GameApp() {
   const workerRef = useRef<Worker | null>(null);
   const [language, setLanguage] = useState<Language>("en");
   const [faction, setFaction] = useState<Faction>("lorgoshki");
-  const [mapSize, setMapSize] = useState(16);
+  const [mapSize, setMapSize] = useState(DEFAULT_MAP_SIZE);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [showInstallHelp, setShowInstallHelp] = useState(false);
   const [isInstalled, setIsInstalled] = useState(false);
@@ -222,10 +222,29 @@ function GameApp() {
 
   useEffect(() => {
     if (process.env.NODE_ENV !== "production" || !("serviceWorker" in navigator)) return;
+    let active = true;
+    let registration: ServiceWorkerRegistration | null = null;
+    const checkForUpdate = () => {
+      if (document.visibilityState !== "visible" || !registration) return;
+      void registration.update().catch((error: unknown) => {
+        console.error("Unable to check for a Lorgoshock update.", error);
+      });
+    };
+
     void navigator.serviceWorker.register(new URL("./service-worker.js", document.baseURI), { updateViaCache: "none" })
+      .then((result) => {
+        if (!active) return;
+        registration = result;
+        checkForUpdate();
+        document.addEventListener("visibilitychange", checkForUpdate);
+      })
       .catch((error: unknown) => {
         console.error("Unable to register the Lorgoshock service worker.", error);
       });
+    return () => {
+      active = false;
+      document.removeEventListener("visibilitychange", checkForUpdate);
+    };
   }, []);
 
   useEffect(() => {
@@ -374,7 +393,7 @@ function GameApp() {
       worker.postMessage({
         type: "START",
         seed: sharedSeed,
-        size: MAP_SIZES.some((size) => size === sharedSize) ? sharedSize : 16,
+        size: MAP_SIZES.some((size) => size === sharedSize) ? sharedSize : DEFAULT_MAP_SIZE,
         faction: sharedFaction === "robots" ? "robots" : "lorgoshki",
       } satisfies GameCommand);
     }
@@ -587,38 +606,42 @@ function GameApp() {
             <p className="intro">{text.intro}</p>
             <div className="hero-stats"><span><strong>4X</strong> explore and expand</span><span><strong>24×24</strong> maximum map</span><span><strong>0</strong> server required</span></div>
           </div>
-          <div className="setup-card">
-            <div className="card-kicker">{text.newGame}<span>01 — SETUP</span></div>
-            <h2>{text.chooseFaction}</h2>
-            <div className="faction-options">
-              <button className={`faction-option ${faction === "lorgoshki" ? "active human" : ""}`} onClick={() => setFaction("lorgoshki")} type="button">
-                <span className="faction-emoji">🧑‍💻</span><span className="faction-label"><strong>{text.lorgoshki}</strong><small>PEOPLE · IDEAS · GEESE</small></span><span className="radio-dot" />
-              </button>
-              <button className={`faction-option ${faction === "robots" ? "active machine" : ""}`} onClick={() => setFaction("robots")} type="button">
-                <span className="faction-emoji">🤖</span><span className="faction-label"><strong>{text.robots}</strong><small>LITHIUM · SERVERS · ALGORITHMS</small></span><span className="radio-dot" />
-              </button>
+          <div className="setup-column">
+            <div className="setup-card">
+              <div className="card-kicker">{text.newGame}<span>01 — SETUP</span></div>
+              <h2>{text.chooseFaction}</h2>
+              <div className="faction-options">
+                <button className={`faction-option ${faction === "lorgoshki" ? "active human" : ""}`} onClick={() => setFaction("lorgoshki")} type="button">
+                  <span className="faction-emoji">👾</span><span className="faction-label"><strong>{text.lorgoshki}</strong><small>ALIENS · IDEAS · GEESE</small></span><span className="radio-dot" />
+                </button>
+                <button className={`faction-option ${faction === "robots" ? "active machine" : ""}`} onClick={() => setFaction("robots")} type="button">
+                  <span className="faction-emoji">🤖</span><span className="faction-label"><strong>{text.robots}</strong><small>LITHIUM · SERVERS · ALGORITHMS</small></span><span className="radio-dot" />
+                </button>
+              </div>
+              <div className="setup-row"><label htmlFor="map-size">{text.mapSize}</label><select id="map-size" value={mapSize} onChange={(event) => setMapSize(Number(event.target.value))}>{MAP_SIZES.map((size) => <option value={size} key={size}>{size} × {size} · {size === 8 ? text.quick : size === 16 ? text.career : text.large}</option>)}</select></div>
+              <button type="button" className="launch-button" onClick={startGame}><span>{text.start}</span><span>↗</span></button>
+              {savedGame && <button type="button" className="launch-button resume-button" onClick={() => {
+                window.history.replaceState({}, "", window.location.pathname);
+                setCombatEvents([]);
+                setResourceEvents([]);
+                setIncomeEvents([]);
+                setPendingIncome({});
+                setMovementEvents([]);
+                setNotices([]);
+                send({ type: "RESUME", state: savedGame });
+              }}><span>{text.resume}</span><span>↗</span></button>}
+              {storageError && <p role="alert">{text[storageError]}</p>}
+              <p className="setup-note">{text.local}</p>
             </div>
-            <div className="setup-row"><label htmlFor="map-size">{text.mapSize}</label><select id="map-size" value={mapSize} onChange={(event) => setMapSize(Number(event.target.value))}>{MAP_SIZES.map((size) => <option value={size} key={size}>{size} × {size} · {size === 8 ? text.quick : size === 16 ? text.career : text.large}</option>)}</select></div>
-            <button type="button" className="launch-button" onClick={startGame}><span>{text.start}</span><span>↗</span></button>
-            {!isInstalled && <button type="button" className="install-button" onClick={installApp}>
-              <span>⇩ {text.installApp}</span><span>↗</span>
-            </button>}
-            {showInstallHelp && <p className="install-help" role="status">{text.installHelp}</p>}
-            {savedGame && <button type="button" className="launch-button resume-button" onClick={() => {
-              window.history.replaceState({}, "", window.location.pathname);
-              setCombatEvents([]);
-              setResourceEvents([]);
-              setIncomeEvents([]);
-              setPendingIncome({});
-              setMovementEvents([]);
-              setNotices([]);
-              send({ type: "RESUME", state: savedGame });
-            }}><span>{text.resume}</span><span>↗</span></button>}
-            {storageError && <p role="alert">{text[storageError]}</p>}
-            <p className="setup-note">{text.local}</p>
+            {!isInstalled && <div className="install-area">
+              <button type="button" className="install-button" onClick={installApp}>
+                <span>⇩ {text.installApp}</span><span>↗</span>
+              </button>
+              {showInstallHelp && <p className="install-help" role="status">{text.installHelp}</p>}
+            </div>}
           </div>
         </section>
-        <footer className="landing-footer"><span>{text.objective}</span><span>{language === "ru" ? "Вдохновлено " : "Inspired by "}<a href="https://polytopia.io/" target="_blank" rel="noopener noreferrer">The Battle of Polytopia</a></span></footer>
+        <footer className="landing-footer"><span>{language === "ru" ? "Вдохновлено " : "Inspired by "}<a href="https://polytopia.io/" target="_blank" rel="noopener noreferrer">The Battle of Polytopia</a></span></footer>
       </main>
     );
   }
@@ -684,11 +707,12 @@ function GameApp() {
             </div>
           </div>}
           {selectedCapture && selectedUnit && <div className="context-actions" aria-label={game.playerFaction === "robots" ? text.layoff : text.acceptOffer}>
-            <div className="context-options"><button type="button" className="context-option"
+            <div className="context-options"><button type="button" className={`context-option capture-action${game.playerFaction === "robots" ? " robot-action" : ""}`}
               disabled={selectedUnit.moved || selectedUnit.attacked}
               onClick={() => send({ type: "CAPTURE", baseId: selectedCapture.id, unitId: selectedUnit.id })}>
-              <img src={`game-art/world/${game.playerFaction === "robots" ? "robot-layoff" : "hr-negotiation"}.png`} alt="" />
+              <span className="capture-action-icon" aria-hidden="true">{game.playerFaction === "robots" ? "−" : "✓"}</span>
               <strong>{game.playerFaction === "robots" ? text.layoff : text.acceptOffer}</strong>
+              <span className="capture-action-arrow" aria-hidden="true">↗</span>
             </button></div>
           </div>}
           {selectedCoffee && <div className="context-actions" aria-label={text.coffee}>
@@ -721,7 +745,9 @@ function GameApp() {
               onClick={() => send({ type: "HEAL", unitId: selectedUnit.id })}>♡ {text.heal} · +{healingAmount(game, selectedUnit)} HP</button>}
             <button type="button" className="action-button" onClick={() => setPanel("tech")}>◎ {text.openTech}</button>
             <button type="button" className="action-button" onClick={() => setPanel("log")}>☰ {text.openLog}</button>
-            <button type="button" className="end-turn-button" disabled={game.status !== "running" || Boolean(game.pendingProgress?.length)} onClick={() => send({ type: "END_TURN" })}>{text.endTurn} <span>→</span></button>
+            <button type="button" className="end-turn-button" disabled={game.status !== "running" || Boolean(game.pendingProgress?.length)} onClick={() => send({ type: "END_TURN" })}>
+              <span className="end-turn-label">{text.endTurn}</span><span className="end-turn-arrow" aria-hidden="true">→</span>
+            </button>
           </div>
         </div>
       </section>

@@ -33,6 +33,8 @@ jobs:
         run: npm run typecheck
       - name: Run unit tests
         run: npm test
+      - name: Version service worker for this deployment
+        run: sed -i "s/__BUILD_ID__/${GITHUB_SHA}/g" public/service-worker.js
       - name: Build static site
         run: npm run build
       - name: Upload Pages artifact

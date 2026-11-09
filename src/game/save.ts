@@ -28,7 +28,7 @@ const tech = z.tuple([z.number().int().min(0).max(3), z.number().int().min(0).ma
 const tokenPair = z.object({ lorgoshki: z.number().nonnegative(), robots: z.number().nonnegative() });
 
 export const savedGameSchema: z.ZodType<GameState> = z.object({
-  seed: z.string(), size: z.union([z.literal(16), z.literal(24), z.literal(32)]),
+  seed: z.string(), size: z.union([z.literal(8), z.literal(16), z.literal(24), z.literal(32)]),
   playerFaction: faction, botFaction: faction, turn: z.number().int().positive(), activeFaction: faction,
   tokens: tokenPair, tiles: z.array(tile), bases: z.array(base).min(1), units: z.array(unit),
   tech: z.object({ lorgoshki: tech, robots: tech }),

@@ -252,22 +252,23 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 
 .launch-button:hover { filter: brightness(1.09); transform: translateY(-1px); }
 .launch-button > span:last-child { font: 20px var(--sans); }
+.setup-column { width: 100%; }
+.install-area { max-width: 470px; margin-top: 12px; }
 .install-button {
   width: 100%;
-  min-height: 41px;
-  margin-top: 9px;
+  min-height: 38px;
   padding: 0 13px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   border: 1px solid #687c70;
-  background: #222b25;
+  background: #1c241f;
   color: #c9dec5;
   font: 600 9px var(--mono);
   letter-spacing: .1em;
   cursor: pointer;
 }
-.install-button:hover { border-color: #9ab891; background: #29372b; }
+.install-button:hover { border-color: #9ab891; background: #252f28; }
 .install-help { margin: 8px 0 0; color: #a7b09c; font: 8px/1.6 var(--mono); }
 .setup-note { margin: 13px 0 0; color: #747a6e; font-size: 10px; text-align: center; }
 .setup-note strong { color: #abb096; font-weight: 500; }
@@ -276,6 +277,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   max-width: 1152px;
   min-height: 36px;
   margin: 0 auto;
+  justify-content: center;
   border-top: 1px solid #ffffff14;
   color: #73796e;
   font-size: 8px;
@@ -536,8 +538,9 @@ kbd { padding: 3px 6px; border: 1px solid #464a3d; color: #c9b57a; font: inherit
 @media (max-width: 720px) {
   .server-cloud { animation: none; }
   .landing { padding: 18px 18px 12px; }
-  .topline { justify-content: flex-end; font-size: 8px; }
-  .topline > .brand-mark { left: 18px; }
+  .topline { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 6px; justify-content: initial; font-size: 8px; }
+  .topline > .brand-mark { position: static; left: auto; }
+  .topline > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .online { font-size: 7px; }
   .hero { min-height: unset; padding: 65px 0 42px; grid-template-columns: 1fr; gap: 35px; }
   .hero-copy { max-width: 500px; }
@@ -546,8 +549,9 @@ kbd { padding: 3px 6px; border: 1px solid #464a3d; color: #c9b57a; font: inherit
   .hero-stats { gap: 16px; margin-top: 24px; }
   .hero-stats > span { font-size: 7px; }
   .setup-card { max-width: 470px; padding: 21px 19px 17px; }
-  .landing-footer { gap: 15px; font-size: 7px; }
-  .landing-footer > span:last-child { text-align: right; }
+  .install-area { margin-top: 10px; }
+  .install-button { min-height: 36px; font-size: 8px; }
+  .landing-footer { font-size: 7px; }
   .game-screen { padding: 0 10px 9px; }
   .game-header { min-height: 57px; }
   .game-brand { font-size: 9px; }
@@ -558,7 +562,7 @@ kbd { padding: 3px 6px; border: 1px solid #464a3d; color: #c9b57a; font: inherit
   .wallet { padding: 0; font-size: 12px; }
   .wallet small { display: none; }
   .leave-button { min-height: 27px; padding: 0 6px; font-size: 7px; }
-  .game-header .language-switch button { min-width: 25px; min-height: 21px; font-size: 7px; }
+  .game-header .language-switch button { min-width: 25px; font-size: 7px; }
   .game-layout { padding-top: 11px; grid-template-columns: 1fr; gap: 9px; }
   .map-canvas { height: min(112vw, 520px); min-height: 390px; }
   .map-legend { min-height: 34px; gap: 8px 13px; font-size: 7px; }
@@ -634,8 +638,10 @@ html, body { width: 100%; height: 100%; overflow: hidden; overscroll-behavior: n
 
 .game-header > * { pointer-events: auto; }
 .game-brand, .turn-indicator, .header-right > * {
+  height: 36px;
   min-height: 36px;
-  padding: 5px 9px;
+  max-height: 36px;
+  padding: 0 9px;
   display: inline-flex;
   align-items: center;
   border: 1px solid #ffffff24;
@@ -646,9 +652,10 @@ html, body { width: 100%; height: 100%; overflow: hidden; overscroll-behavior: n
 .game-brand .brand-mark { width: 27px; height: 27px; }
 .turn-indicator { gap: 8px; }
 .header-right { margin-left: auto; gap: 6px; }
-.wallet { padding: 5px 9px; }
-.header-right .language-switch { min-height: 30px; }
-.leave-button { min-height: 30px; padding: 0 8px; }
+.wallet { justify-content: center; gap: 4px; padding: 0 9px; text-align: center; }
+.game-header .language-switch { height: 36px; min-height: 36px; max-height: 36px; padding: 2px; }
+.game-header .language-switch button { height: 28px; min-height: 28px; }
+.leave-button { height: 36px; min-height: 36px; padding: 0 8px; }
 
 .game-layout {
   position: absolute;
@@ -693,9 +700,60 @@ html, body { width: 100%; height: 100%; overflow: hidden; overscroll-behavior: n
 .action-bar > * { pointer-events: auto; }
 .selection-summary { min-width: 130px; }
 .action-bar .action-button, .action-bar .secondary-action, .action-bar .end-turn-button {
-  min-height: 40px;
+  height: 36px;
+  min-height: 36px;
   white-space: nowrap;
 }
+.action-bar .end-turn-button { position: relative; gap: 0; }
+.action-bar .end-turn-button .end-turn-label { min-width: 0; flex: 1; text-align: center; }
+.action-bar .end-turn-button .end-turn-arrow {
+  position: static;
+  flex: 0 0 auto;
+  transform: none;
+  font: 13px/1 var(--sans);
+}
+
+.context-option.capture-action {
+  width: min(220px, calc(100vw - 32px));
+  min-height: 54px;
+  padding: 7px 10px;
+  grid-template-columns: 32px minmax(0, 1fr) 16px;
+  align-items: center;
+  justify-items: stretch;
+  gap: 8px;
+  border-color: #ffe091;
+  background: linear-gradient(135deg, #ffe9a4, #eab753);
+  color: #302313;
+  box-shadow: 0 4px 16px #0b111c99, inset 0 1px #fff9d8;
+  text-align: left;
+  transition: transform .14s ease, box-shadow .14s ease, filter .14s ease;
+}
+.context-option.capture-action:hover:not(:disabled) {
+  transform: translateY(-2px);
+  border-color: #fff3c9;
+  background: linear-gradient(135deg, #fff0bd, #f3c668);
+  box-shadow: 0 7px 22px #0b111caa, inset 0 1px #fff9d8;
+}
+.context-option.capture-action:active:not(:disabled) { transform: translateY(0) scale(.97); }
+.context-option.capture-action:disabled { opacity: .55; cursor: not-allowed; }
+.context-option.capture-action .capture-action-icon {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 2px solid #55411e;
+  border-radius: 50%;
+  background: #fff4d0;
+  color: #3e5a31;
+  font: 700 20px/1 var(--sans);
+}
+.context-option.capture-action strong { color: #302313; font: 700 9px var(--mono); letter-spacing: .04em; }
+.context-option.capture-action .capture-action-arrow { color: #3e321d; font: 18px/1 var(--sans); }
+.context-option.capture-action.robot-action {
+  border-color: #ffa3a2;
+  background: linear-gradient(135deg, #ffd1b6, #eb897d);
+}
+.context-option.capture-action.robot-action .capture-action-icon { color: #9c3c39; }
 
 .context-actions {
   position: absolute;
@@ -830,7 +888,9 @@ html, body { width: 100%; height: 100%; overflow: hidden; overscroll-behavior: n
   .hero-stats { gap: 9px; margin-top: 10px; font-size: 6px; }
   .hero-stats > span { gap: 3px; }
   .hero-stats strong { font-size: 11px; }
-  .setup-card { max-width: none; padding: 12px; }
+  .setup-card { max-width: 470px; padding: 12px; }
+  .install-area { margin-top: 9px; }
+  .install-button { min-height: 36px; font-size: 7px; }
   .setup-card h2 { margin: 10px 0; font-size: 18px; }
   .faction-options { gap: 5px; }
   .faction-option { min-height: 48px; padding: 6px 9px; }
@@ -839,27 +899,27 @@ html, body { width: 100%; height: 100%; overflow: hidden; overscroll-behavior: n
   .faction-label small { font-size: 6px; }
   .setup-row { min-height: 36px; }
   .launch-button { min-height: 39px; margin-top: 10px; }
-  .install-button { min-height: 37px; font-size: 7px; }
+  .install-button { min-height: 36px; font-size: 7px; }
   .setup-note { margin-top: 7px; font-size: 8px; }
   .landing-footer { min-height: 22px; font-size: 6px; }
 
   .game-header { top: 7px; left: 7px; right: 7px; min-height: 34px; gap: 5px; }
-  .game-brand, .turn-indicator, .header-right > * { min-height: 31px; padding: 3px 5px; }
+  .game-brand, .turn-indicator, .header-right > * { height: 34px; min-height: 34px; max-height: 34px; padding: 0 5px; }
   .game-brand { gap: 5px; font-size: 7px; }
   .game-brand .brand-mark { width: 23px; height: 23px; font-size: 9px; }
   .game-brand small { font-size: 6px; }
   .turn-indicator { gap: 4px; font-size: 7px; }
   .header-right { gap: 3px; }
-  .wallet { padding: 3px 5px; font-size: 11px; }
+  .wallet { padding: 0 5px; font-size: 11px; }
   .wallet small { display: none; }
-  .header-right .language-switch { min-height: 27px; padding: 1px; }
-  .game-header .language-switch button { min-width: 22px; min-height: 22px; }
-  .leave-button { min-height: 27px; padding: 0 5px; font-size: 8px; }
+  .game-header .language-switch { height: 34px; min-height: 34px; max-height: 34px; padding: 2px; }
+  .game-header .language-switch button { min-width: 22px; height: 26px; min-height: 26px; }
+  .leave-button { height: 34px; min-height: 34px; padding: 0 5px; font-size: 8px; }
 
   .action-bar {
     bottom: max(7px, env(safe-area-inset-bottom));
     width: calc(100% - 14px);
-    min-height: 0;
+    min-height: 46px;
     flex-wrap: nowrap;
     gap: 4px;
     padding: 5px;
@@ -872,7 +932,9 @@ html, body { width: 100%; height: 100%; overflow: hidden; overscroll-behavior: n
   .action-bar .action-button, .action-bar .secondary-action, .action-bar .end-turn-button {
     flex: 0 1 auto;
     min-width: 0;
-    min-height: 36px;
+    height: 34px;
+    min-height: 34px;
+    max-height: 34px;
     padding: 0 5px;
     font-size: 6px;
     letter-spacing: 0;

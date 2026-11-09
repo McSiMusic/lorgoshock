@@ -1,4 +1,4 @@
-const CACHE_NAME = "lorgoshock-pwa-v1";
+const CACHE_NAME = "lorgoshock-pwa-__BUILD_ID__";
 
 self.addEventListener("install", (event) => {
   event.waitUntil((async () => {

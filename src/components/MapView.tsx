@@ -5,7 +5,7 @@ import { Application, Assets, Container, Graphics, Sprite, Text, Texture } from 
 import { OutlineFilter } from "pixi-filters";
 import { createIsometricGrid, fleePosition, initialMapZoom, screenToTile, tileCenter } from "../game/isometric";
 import { buildingKind, buildingLayout } from "../game/buildings";
-import { BOT_FOCUS_DURATION, COMBAT_DURATION, INCOME_DURATION, RESOURCE_ARRIVAL, RESOURCE_DURATION, TRANSFORMATION_DURATION, advancePosition, incomeCoinAmount, incomeCoinCount, incomeCoinProgress, resourceStarProgress, transformationFrame } from "../game/animation";
+import { BOT_FOCUS_DURATION, COMBAT_DURATION, FOG_REVEAL_DURATION, INCOME_DURATION, RESOURCE_ARRIVAL, RESOURCE_DURATION, TRANSFORMATION_DURATION, advancePosition, fogRevealAlpha, incomeCoinAmount, incomeCoinCount, incomeCoinProgress, resourceStarProgress, transformationFrame } from "../game/animation";
 import { UNIT_DEFINITIONS, type Base, type CombatEvent, type GameState, type IncomeEvent, type MovementEvent, type ResourceEvent, type Terrain, type Unit } from "../game/model";
 import { canAttack, canHarvestWithinCity, canMoveTo, cityCapacity, cityOccupancy, damage, gridDistance, hasCover, hasUnitAction, resourceCity } from "../game/rules";
 import { UNIT_ART_FILES, unitArtKey } from "../game/unitArt";
@@ -55,9 +55,14 @@ const ART_FILES = {
     geese: "world/poi-geese.png",
     icedLatte: "world/iced-latte.png",
     smoke: "world/upgrade-smoke.png",
+    resourceStar: "world/resource-star.png",
     electricSpark: "world/electric-spark.png",
     hrNegotiation: "world/hr-negotiation.png",
     robotLayoff: "world/robot-layoff.png",
+    bridgeHumanX: "world/bridge-human-x.png",
+    bridgeHumanY: "world/bridge-human-y.png",
+    bridgeRobotX: "world/bridge-robot-x.png",
+    bridgeRobotY: "world/bridge-robot-y.png",
     garage: "world/city-garage.png",
     human1: "world/city-human-1.png",
     human2: "world/city-human-2.png",
@@ -131,58 +136,47 @@ function drawTile(
   root.addChild(block);
   if (unexplored) return;
 
-  const terrainSprite = new Sprite(getTerrainTexture(art, tile.terrain, variant));
-  terrainSprite.anchor.set(0.5);
-  terrainSprite.position.set(x, y);
-  fitSprite(terrainSprite, width * 2, height * 2);
-  root.addChild(terrainSprite);
+  if (tile.terrain === "water" && game.playerFaction === "robots") {
+    drawDriedLake(root, x, y, width, height, variant);
+  } else {
+    const terrainSprite = new Sprite(getTerrainTexture(art, tile.terrain, variant));
+    terrainSprite.anchor.set(0.5);
+    terrainSprite.position.set(x, y);
+    fitSprite(terrainSprite, width * 2, height * 2);
+    root.addChild(terrainSprite);
+  }
 }
 
-function drawBridge(root: Container, x: number, y: number, width: number, height: number, axis: "x" | "y", robot: boolean): void {
-  const graphics = new Graphics();
-  const direction = axis === "x" ? 1 : -1;
-  const point = (along: number, across: number, lift = 0) => ({
-    x: x + along * width * 0.42 + across * width * 0.09,
-    y: y + direction * along * height * 0.21 - direction * across * height * 0.09 - lift * height * 0.08,
-  });
-  const line = (a: ReturnType<typeof point>, b: ReturnType<typeof point>, color: number, thickness: number, alpha = 1) =>
-    graphics.moveTo(a.x, a.y).lineTo(b.x, b.y).stroke({ color, width: Math.max(0.7, width * thickness), alpha });
-  const quad = (points: Array<ReturnType<typeof point>>, color: number, alpha = 1) =>
-    graphics.poly(points.flatMap((p) => [p.x, p.y])).fill({ color, alpha });
-
-  quad([point(-1, -1, -0.15), point(1, -1, -0.15), point(1, 1, -0.15), point(-1, 1, -0.15)], 0x143c54, 0.4);
-  quad([point(-1, 1), point(1, 1), point(1, 1, -0.18), point(-1, 1, -0.18)], robot ? 0x29445c : 0x6a3d27);
-  quad([point(-1, -1), point(1, -1), point(1, 1), point(-1, 1)], robot ? 0x3e6475 : 0xb87d46);
-  line(point(-1, -1), point(1, -1), robot ? 0xa2e8ee : 0xf2ce8a, 0.06);
-  line(point(-1, 1), point(1, 1), robot ? 0x173b58 : 0x633922, 0.07);
-
-  for (let i = 0; i <= 9; i++) {
-    const along = -1 + i * 2 / 9;
-    line(point(along, -0.95), point(along, 0.95), robot ? 0x203f53 : 0x71442b, 0.028);
-    if (i < 9) line(point(along + 0.035, -0.85), point(along + 0.035, 0.85), robot ? 0x8dd5d9 : 0xe7b77a, 0.018, 0.8);
+function drawDriedLake(root: Container, x: number, y: number, width: number, height: number, variant: number): void {
+  const lake = new Graphics();
+  const tile = diamond(x, y, width, height);
+  lake.poly(tile).fill(variant % 2 ? 0xb9a777 : 0xc6b583);
+  lake.poly(diamond(x, y, width * 0.86, height * 0.82))
+    .fill({ color: 0xd3c18d, alpha: 0.58 })
+    .stroke({ color: 0x8e7950, alpha: 0.55, width: Math.max(0.4, width * 0.018) });
+  for (let i = 0; i < 4; i++) {
+    const offset = (variant + i * 3) % 4;
+    const px = x + (offset - 1.5) * width * 0.15;
+    const py = y + ((i % 2) - 0.5) * height * 0.42;
+    lake.moveTo(px - width * 0.12, py)
+      .lineTo(px - width * 0.04, py - height * 0.1)
+      .lineTo(px + width * 0.02, py + height * 0.04)
+      .lineTo(px + width * 0.12, py - height * 0.03)
+      .stroke({ color: 0x927c50, alpha: 0.66, width: Math.max(0.45, width * 0.018) });
   }
-  if (robot) {
-    for (const across of [-0.55, 0, 0.55]) {
-      line(point(-0.88, across, 0.02), point(0.88, across, 0.02), 0x54f6ff, across === 0 ? 0.045 : 0.025, 0.95);
-    }
-  } else {
-    for (const along of [-0.78, -0.35, 0.1, 0.55, 0.9]) {
-      for (const across of [-0.72, 0.72]) {
-        const nail = point(along, across, 0.02);
-        graphics.circle(nail.x, nail.y, Math.max(0.6, width * 0.027)).fill(0x5c3a2a);
-      }
-    }
+  const puddles = [
+    { x: x - width * 0.22, y: y - height * 0.1, rx: width * 0.12, ry: height * 0.095 },
+    { x: x + width * 0.19, y: y + height * 0.18, rx: width * 0.09, ry: height * 0.07 },
+    { x: x + (variant % 2 ? -1 : 1) * width * 0.04, y: y - height * 0.38, rx: width * 0.07, ry: height * 0.05 },
+  ];
+  for (const puddle of puddles) {
+    lake.ellipse(puddle.x, puddle.y, puddle.rx * 1.5, puddle.ry * 1.5)
+      .fill({ color: 0xe2d09c, alpha: 0.8 });
+    lake.ellipse(puddle.x, puddle.y, puddle.rx, puddle.ry)
+      .fill({ color: 0x6da8a0, alpha: 0.88 })
+      .stroke({ color: 0xeee0b0, alpha: 0.75, width: Math.max(0.5, width * 0.02) });
   }
-  for (const across of [-1, 1]) {
-    for (const along of [-0.9, -0.3, 0.3, 0.9]) {
-      line(point(along, across), point(along, across, 0.3), robot ? 0x315568 : 0x70462c, 0.075);
-      const cap = point(along, across, 0.32);
-      graphics.circle(cap.x, cap.y, Math.max(0.8, width * 0.055)).fill(robot ? 0x8afaff : 0xf2c989);
-    }
-    line(point(-0.95, across, 0.3), point(0.95, across, 0.3), robot ? 0x68eafa : 0xd5a36d, 0.045);
-    line(point(-0.95, across, 0.14), point(0.95, across, 0.14), robot ? 0x3eb7d5 : 0x9e6d43, 0.025);
-  }
-  root.addChild(graphics);
+  root.addChild(lake);
 }
 
 function drawTileDetails(
@@ -221,7 +215,14 @@ function drawTileDetails(
     addWorldSprite(root, art.workationFloats, x, y + height * 0.6, width * 1.8, height * 1.7);
   }
   if (tile.bridge) {
-    drawBridge(root, x, y, width, height, tile.bridge.axis, tile.bridge.faction === "robots");
+    const bridgeArt = tile.bridge.faction === "robots"
+      ? tile.bridge.axis === "x" ? art.bridgeRobotX : art.bridgeRobotY
+      : tile.bridge.axis === "x" ? art.bridgeHumanX : art.bridgeHumanY;
+    const bridge = new Sprite(bridgeArt);
+    bridge.anchor.set(0.5);
+    bridge.position.set(x, y);
+    fitSprite(bridge, width * 2, height * 2);
+    root.addChild(bridge);
   }
   if (tile.poi && !tile.poiClaimed) {
     if (tile.poi === "coffee") {
@@ -292,13 +293,11 @@ function drawBase(root: Container, grid: ReturnType<typeof createIsometricGrid>,
   if (base.rank >= 4 && base.owner) city.filters = [outline()];
 }
 
-function drawCaptureBadge(root: Container, grid: ReturnType<typeof createIsometricGrid>, game: GameState, base: GameState["bases"][number], art: GameArt, revealMap: boolean): void {
-  const status = base.capture ?? base.captureResult;
+function drawCaptureBadge(root: Container, grid: ReturnType<typeof createIsometricGrid>, game: GameState, base: GameState["bases"][number], art: GameArt, revealMap: boolean, floatingIcons: FloatingIcon[], zoom: number): void {
+  const status = base.capture;
   if (!status || (!revealMap && !game.tiles[base.y * game.size + base.x]?.explored && status.faction !== game.playerFaction)) return;
   const { x, y } = tileCenter(grid, base.x, base.y);
-  const ready = Boolean(base.capture && base.capture.readyTurn <= game.turn && status.faction === game.playerFaction);
-  const readyUnit = ready ? game.units.find((unit) => unit.id === base.capture?.unitId) : undefined;
-  const canCapture = Boolean(readyUnit && !readyUnit.moved && !readyUnit.attacked);
+  const phase = (base.x * 17 + base.y * 31) * 0.13;
   const scale = Math.max(15, grid.tileWidth * 1.15);
   const icon = new Sprite(status.faction === "robots" ? art.robotLayoff : art.hrNegotiation);
   icon.anchor.set(0.5, 1);
@@ -306,8 +305,9 @@ function drawCaptureBadge(root: Container, grid: ReturnType<typeof createIsometr
   const iconY = y - grid.tileHeight * 1.45;
   icon.position.set(iconX, iconY);
   fitSprite(icon, scale, scale);
-  if (canCapture) icon.filters = [outline()];
+  icon.filters = [outline()];
   root.addChild(icon);
+  floatingIcons.push({ sprite: icon, y: iconY, phase, amplitude: 3 / zoom });
 }
 
 function getUnitTexture(art: GameArt, unit: Unit): Texture {
@@ -354,7 +354,7 @@ function drawUnit(
   const character = new Sprite(getUnitTexture(art, unit));
   character.anchor.set(0.5, unitAnchorY(unit));
   character.position.set(x, y);
-  fitSprite(character, size * 0.88, unitTileHeight * 2.05);
+  fitSprite(character, size * 0.66, unitTileHeight * 1.54);
   const canAct = unit.faction === game.playerFaction && hasUnitAction(game, unit);
   if (attackable) character.tint = 0xff5555;
   else if (unit.faction === game.playerFaction && !canAct) character.tint = 0x888888;
@@ -410,6 +410,7 @@ type ActiveCombat = { event: CombatEvent; started: number };
 type ActiveResource = { event: ResourceEvent; started: number };
 type ActiveIncome = { event: IncomeEvent; started: number; arrived: number };
 type Transformation = { started: number; previous: Base };
+type FloatingIcon = { sprite: Sprite; y: number; phase: number; amplitude: number };
 
 function drawStaticWorld(
   root: Container,
@@ -425,7 +426,7 @@ function drawStaticWorld(
   tiles.forEach((tile, index) => drawTileDetails(root, grid, game, tile, index, art, revealMap));
 }
 
-function drawResourceEffect(root: Container, grid: ReturnType<typeof createIsometricGrid>, game: GameState, art: GameArt, active: ActiveResource, now: number): void {
+function drawResourceEffect(root: Container, grid: ReturnType<typeof createIsometricGrid>, game: GameState, art: GameArt, active: ActiveResource, now: number, zoom: number): void {
   const progress = (now - active.started) / RESOURCE_DURATION;
   const target = tileCenter(grid, active.event.x, active.event.y);
   const base = game.bases.find((entry) => entry.id === active.event.baseId);
@@ -447,21 +448,28 @@ function drawResourceEffect(root: Container, grid: ReturnType<typeof createIsome
     const destination = tileCenter(grid, base.x, base.y);
     for (let i = 0; i < active.event.progress; i++) {
       const phase = resourceStarProgress(now - active.started, i);
-      effect.star(target.x + (destination.x - target.x) * phase, target.y + (destination.y - target.y) * phase - Math.sin(phase * Math.PI) * 20, 5, 5)
-        .fill({ color: 0xffec83, alpha: 1 - phase * 0.5 });
+      const star = new Sprite(art.resourceStar);
+      star.anchor.set(0.5);
+      fitSprite(star, 7 / zoom, 7 / zoom);
+      star.position.set(
+        target.x + (destination.x - target.x) * phase,
+        target.y + (destination.y - target.y) * phase - Math.sin(phase * Math.PI) * 20 / zoom,
+      );
+      star.alpha = 1 - phase * 0.5;
+      root.addChild(star);
     }
   }
   root.addChild(effect);
 }
 
-function drawIncomeEffect(root: Container, grid: ReturnType<typeof createIsometricGrid>, active: ActiveIncome, wallet: { x: number; y: number }, now: number): void {
+function drawIncomeEffect(root: Container, grid: ReturnType<typeof createIsometricGrid>, active: ActiveIncome, wallet: { x: number; y: number }, now: number, zoom: number): void {
   const source = tileCenter(grid, active.event.x, active.event.y);
   const coins = new Graphics();
   for (let i = 0; i < incomeCoinCount(active.event.amount); i++) {
     const t = incomeCoinProgress(now - active.started, i);
     if (t <= 0 || t >= 1) continue;
-    coins.circle(source.x + (wallet.x - source.x) * t, source.y + (wallet.y - source.y) * t - Math.sin(t * Math.PI) * 35, 4)
-      .fill({ color: 0xffd25c }).stroke({ color: 0x8c5c24, width: 1.5 });
+    coins.circle(source.x + (wallet.x - source.x) * t, source.y + (wallet.y - source.y) * t - Math.sin(t * Math.PI) * 35 / zoom, 4 / zoom)
+      .fill({ color: 0xffd25c }).stroke({ color: 0x8c5c24, width: 1.5 / zoom });
   }
   root.addChild(coins);
 }
@@ -621,8 +629,11 @@ function drawLatest(
   activeResources: ActiveResource[] = [],
   activeIncome: ActiveIncome[] = [],
   wallet = { x: app.screen.width, y: 0 },
+  fogReveals: Map<number, number> = new Map(),
+  floatingIcons: FloatingIcon[] = [],
 ): void {
   root.removeChildren().forEach((child) => child.destroy({ children: true }));
+  floatingIcons.length = 0;
   world.pivot.set(app.screen.width / 2, app.screen.height / 2);
   world.position.set(app.screen.width / 2 + pan.x, app.screen.height / 2 + pan.y);
   world.scale.set(zoom);
@@ -666,7 +677,7 @@ function drawLatest(
         const marker = new Graphics();
         polygon(marker, diamond(x, y, grid.tileWidth * 0.55, grid.tileHeight * 0.55), 0x67efff, 0.45);
         marker.poly(diamond(x, y, grid.tileWidth * 0.55, grid.tileHeight * 0.55))
-          .stroke({ color: 0x9dffff, width: Math.max(0.8, grid.tileWidth * 0.04), alpha: 0.93 });
+          .stroke({ color: 0x9dffff, width: 1.4 / zoom, alpha: 0.93 });
         root.addChild(marker);
       }
     }
@@ -674,7 +685,7 @@ function drawLatest(
     const center = tileCenter(grid, selected.x, selected.y);
     const marker = new Graphics();
     marker.poly(diamond(center.x, center.y, grid.tileWidth * 0.94, grid.tileHeight * 0.94))
-      .stroke({ color: 0xffffff, alpha: 0.94, width: Math.max(1.5, grid.tileWidth * 0.07) });
+      .stroke({ color: 0xffffff, alpha: 0.94, width: 2 / zoom });
     root.addChild(marker);
   }
 
@@ -716,20 +727,26 @@ function drawLatest(
       && candidate.faction === game.playerFaction && candidate.x === coffee.x && candidate.y === coffee.y);
     if (!unit || game.turn < coffee.readyTurn) continue;
     const { x, y } = tileCenter(grid, coffee.x, coffee.y);
-    const icon = addWorldSprite(root, art.icedLatte, x, y - grid.tileHeight * 2, grid.tileWidth, grid.tileHeight * 2);
+    const phase = (coffee.x * 17 + coffee.y * 31) * 0.13;
+    const iconY = y - grid.tileHeight * 2;
+    const icon = addWorldSprite(root, art.icedLatte, x, iconY, grid.tileWidth, grid.tileHeight * 2);
     icon.filters = [outline()];
+    floatingIcons.push({ sprite: icon, y: iconY, phase, amplitude: 3 / zoom });
   }
   for (const visit of game.coinVisits) {
     const unit = game.units.find((candidate) => candidate.id === visit.unitId && candidate.faction === game.playerFaction
       && candidate.x === visit.x && candidate.y === visit.y);
     if (!unit || game.turn < visit.readyTurn || unit.moved || unit.attacked) continue;
     const { x, y } = tileCenter(grid, visit.x, visit.y);
-    const icon = addWorldSprite(root, art.treasury, x, y - grid.tileHeight * 2, grid.tileWidth * 0.65, grid.tileHeight * 1.3);
+    const phase = (visit.x * 17 + visit.y * 31) * 0.13;
+    const iconY = y - grid.tileHeight * 2;
+    const icon = addWorldSprite(root, art.treasury, x, iconY, grid.tileWidth * 0.65, grid.tileHeight * 1.3);
     icon.filters = [outline()];
+    floatingIcons.push({ sprite: icon, y: iconY, phase, amplitude: 3 / zoom });
   }
   const selectedInCombat = combat && (selectedUnitId === combat.event.attacker.id || selectedUnitId === combat.event.defender.id);
   if (combat && !selectedInCombat) drawCombat(root, grid, game, art, combat.event, combat.progress);
-  for (const base of game.bases) drawCaptureBadge(root, grid, game, base, art, revealMap);
+  for (const base of game.bases) drawCaptureBadge(root, grid, game, base, art, revealMap, floatingIcons, zoom);
   for (const base of game.bases) {
     if (!base.owner || (!revealMap && !game.tiles[base.y * game.size + base.x]?.explored && base.owner !== game.playerFaction)) continue;
     const kind = buildingKind(base);
@@ -737,17 +754,18 @@ function drawLatest(
     const { x, y } = tileCenter(grid, base.x, base.y);
     const count = cityCapacity(base);
     const occupied = cityOccupancy(game, base);
-    const cell = Math.max(4, grid.tileWidth * 0.2), gap = Math.max(1, grid.tileWidth * 0.04);
-    const top = y - art[kind].height * layout.scale * layout.anchorY - cell * 1.5;
+    const cell = Math.max(3, Math.min(10, grid.tileWidth * 0.4) / zoom);
+    const gap = Math.max(1, Math.min(3, grid.tileWidth * 0.08) / zoom);
+    const top = y - art[kind].height * layout.scale * layout.anchorY - cell * 1.3;
     const bar = new Graphics();
     const progress = base.rank >= 4 ? count : base.progress;
     for (let i = 0; i < count; i++) {
       const cellX = x - (count * cell + (count - 1) * gap) / 2 + i * (cell + gap);
       bar.roundRect(cellX, top, cell, cell * 0.62, 1)
-        .fill(0x243b4c).stroke({ color: 0xffffff, width: 0.8 });
-      bar.circle(cellX + cell / 2, top + cell * 0.31, cell * 0.17)
+        .fill(0x243b4c).stroke({ color: 0xffffff, width: 0.65 / zoom });
+      bar.circle(cellX + cell / 2, top + cell * 0.31, cell * 0.14)
         .fill(i < occupied ? 0xffdc5d : 0x132331)
-        .stroke({ color: i < occupied ? 0xfff0a3 : 0x7d8b8b, width: 0.6 });
+        .stroke({ color: i < occupied ? 0xfff0a3 : 0x7d8b8b, width: 0.35 / zoom });
       bar.roundRect(cellX + cell * 0.12, top + cell * 0.49, cell * 0.76, cell * 0.09, 1)
         .fill(i < progress ? 0xffdc5d : 0x132331);
     }
@@ -757,8 +775,21 @@ function drawLatest(
     drawUnit(root, grid, playerUnit, game, art, false, animatedPositions.get(playerUnit.id), revealMap);
   }
   if (combat && selectedInCombat) drawCombat(root, grid, game, art, combat.event, combat.progress);
-  for (const resource of activeResources) drawResourceEffect(root, grid, game, art, resource, performance.now());
-  for (const income of activeIncome) drawIncomeEffect(root, grid, income, wallet, performance.now());
+  for (const [index, started] of fogReveals) {
+    const elapsed = performance.now() - started;
+    if (elapsed >= FOG_REVEAL_DURATION) {
+      fogReveals.delete(index);
+      continue;
+    }
+    const tile = game.tiles[index];
+    if (!tile) continue;
+    const center = tileCenter(grid, tile.x, tile.y);
+    const fog = new Graphics();
+    polygon(fog, diamond(center.x, center.y, grid.tileWidth, grid.tileHeight), 0xe9f3f6, fogRevealAlpha(elapsed));
+    root.addChild(fog);
+  }
+  for (const resource of activeResources) drawResourceEffect(root, grid, game, art, resource, performance.now(), zoom);
+  for (const income of activeIncome) drawIncomeEffect(root, grid, income, wallet, performance.now(), zoom);
 }
 
 export default function MapView({ game, selected, selectedUnitId, selectedCityId, language, revealMap, combatEvents, resourceEvents, incomeEvents, movementEvents, focusTarget, onFocusArrived, onIncomeArrived, onResourceArrived, onAnimationsFinished, onTileClick, onSelectCoffee, onCapture, onCollectCoins }: Props) {
@@ -798,6 +829,9 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
   const activeResourcesRef = useRef<ActiveResource[]>([]);
   const lastIncomeIdRef = useRef(0);
   const activeIncomeRef = useRef<ActiveIncome[]>([]);
+  const fogRevealsRef = useRef(new Map<number, number>());
+  const previousExploredRef = useRef<Map<number, boolean> | null>(null);
+  const floatingIconsRef = useRef<FloatingIcon[]>([]);
   const panRef = useRef({ x: 0, y: 0 });
   const cameraRef = useRef<{ id: number; from: { x: number; y: number }; to: { x: number; y: number }; started: number } | null>(null);
   const dragRef = useRef<{ pointerId: number; x: number; y: number; panX: number; panY: number; moved: boolean } | null>(null);
@@ -901,6 +935,13 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
     const previous = previousUnitsRef.current;
     const previousBoosts = previousUnitBoostsRef.current;
     const now = performance.now();
+    const previousExplored = previousExploredRef.current;
+    if (previousExplored) {
+      game.tiles.forEach((tile, index) => {
+        if (!previousExplored.get(index) && tile.explored) fogRevealsRef.current.set(index, now);
+      });
+    }
+    previousExploredRef.current = new Map(game.tiles.map((tile, index) => [index, tile.explored]));
     for (const unit of game.units) {
       const oldPosition = previous.get(unit.id);
       const combatAdvance = combatEvents.some((event) => event.id > lastPositionCombatIdRef.current && event.advance && event.attacker.id === unit.id);
@@ -942,6 +983,7 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
     let active = true;
     let root: Container | null = null;
     let world: Container | null = null;
+    let animateFloatingIcons: () => void = () => undefined;
     const app = new Application();
 
     const draw = () => {
@@ -949,7 +991,7 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
       const currentWorld = worldRef.current;
       const currentApp = appRef.current;
       if (currentRoot && currentWorld && currentApp && artRef.current) {
-        drawLatest(currentRoot, currentWorld, currentApp, gameRef.current, selectedRef.current, selectedUnitIdRef.current, artRef.current, zoomRef.current, new Map(), panRef.current, undefined, selectedCityIdRef.current, languageRef.current, transformationsRef.current, revealMapRef.current);
+        drawLatest(currentRoot, currentWorld, currentApp, gameRef.current, selectedRef.current, selectedUnitIdRef.current, artRef.current, zoomRef.current, new Map(), panRef.current, undefined, selectedCityIdRef.current, languageRef.current, transformationsRef.current, revealMapRef.current, [], [], undefined, fogRevealsRef.current, floatingIconsRef.current);
       }
     };
     drawRef.current = draw;
@@ -1016,7 +1058,8 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
         const { x, y } = tileCenter(grid, base.x, base.y);
         const scale = Math.max(15, grid.tileWidth * 1.15);
         const iconX = x + grid.tileWidth * 0.48;
-        const bottom = y - grid.tileHeight * 1.45;
+        const phase = (base.x * 17 + base.y * 31) * 0.13;
+        const bottom = y - grid.tileHeight * 1.45 + Math.sin(performance.now() / 360 + phase) * 3 / zoomRef.current;
         return Math.abs(unscaledPoint.x - iconX) <= scale * 0.58
           && unscaledPoint.y >= bottom - scale * 1.13
           && unscaledPoint.y <= bottom;
@@ -1198,6 +1241,16 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
       appRef.current = app;
       host.appendChild(app.canvas);
       app.ticker.maxFPS = mobile ? 24 : 30;
+      animateFloatingIcons = () => {
+        const time = performance.now() / 360;
+        for (const icon of floatingIconsRef.current) {
+          if (!icon.sprite.parent) continue;
+          const offset = Math.sin(time + icon.phase) * icon.amplitude;
+          icon.sprite.y = icon.y + offset;
+          icon.sprite.rotation = Math.sin(time + icon.phase) * 0.025;
+        }
+      };
+      app.ticker.add(animateFloatingIcons);
       world = new Container();
       root = new Container();
       app.stage.addChild(world, root);
@@ -1242,6 +1295,7 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
       observer.disconnect();
       host.removeEventListener("wheel", handleWheel);
       if (appRef.current) {
+        appRef.current.ticker.remove(animateFloatingIcons);
         appRef.current.canvas.removeEventListener("pointerup", handlePointerUp);
         appRef.current.canvas.removeEventListener("pointerdown", handlePointerDown);
         appRef.current.canvas.removeEventListener("pointermove", handlePointerMove);
@@ -1261,8 +1315,8 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
     const world = worldRef.current;
     const app = appRef.current;
     if (!root || !world || !app) return;
-    if (!cameraRef.current && !animationsRef.current.size && !combatQueueRef.current.length && !activeCombatRef.current && !transformationsRef.current.size && !activeResourcesRef.current.length && !activeIncomeRef.current.length) {
-      if (artRef.current) drawLatest(root, world, app, game, selected, selectedUnitId, artRef.current, zoomRef.current, new Map(), panRef.current, undefined, selectedCityId, language, new Map(), revealMap);
+    if (!cameraRef.current && !animationsRef.current.size && !combatQueueRef.current.length && !activeCombatRef.current && !transformationsRef.current.size && !activeResourcesRef.current.length && !activeIncomeRef.current.length && !fogRevealsRef.current.size) {
+      if (artRef.current) drawLatest(root, world, app, game, selected, selectedUnitId, artRef.current, zoomRef.current, new Map(), panRef.current, undefined, selectedCityId, language, new Map(), revealMap, [], [], undefined, fogRevealsRef.current, floatingIconsRef.current);
       if (game.status !== "running") animationsFinishedRef.current();
       return;
     }
@@ -1300,6 +1354,9 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
       for (const [id, transformation] of transformationsRef.current) {
         if (now - transformation.started >= TRANSFORMATION_DURATION) transformationsRef.current.delete(id);
       }
+      for (const [index, started] of fogRevealsRef.current) {
+        if (now - started >= FOG_REVEAL_DURATION) fogRevealsRef.current.delete(index);
+      }
       if (!activeCombatRef.current && combatQueueRef.current.length) {
         activeCombatRef.current = { event: combatQueueRef.current.shift()!, started: now };
       }
@@ -1326,13 +1383,13 @@ export default function MapView({ game, selected, selectedUnitId, selectedCityId
         x: ((walletRect.left + walletRect.width / 2 - hostRect.left) * app.screen.width / hostRect.width - app.screen.width / 2 - panRef.current.x) / zoomRef.current + app.screen.width / 2,
         y: ((walletRect.top + walletRect.height / 2 - hostRect.top) * app.screen.height / hostRect.height - app.screen.height / 2 - panRef.current.y) / zoomRef.current + app.screen.height / 2,
       } : { x: app.screen.width, y: 0 };
-      if (artRef.current) drawLatest(root, world, app, gameRef.current, selectedRef.current, selectedUnitIdRef.current, artRef.current, zoomRef.current, positions, panRef.current, combat, selectedCityIdRef.current, languageRef.current, transformationsRef.current, revealMapRef.current, activeResourcesRef.current, activeIncomeRef.current, wallet);
+      if (artRef.current) drawLatest(root, world, app, gameRef.current, selectedRef.current, selectedUnitIdRef.current, artRef.current, zoomRef.current, positions, panRef.current, combat, selectedCityIdRef.current, languageRef.current, transformationsRef.current, revealMapRef.current, activeResourcesRef.current, activeIncomeRef.current, wallet, fogRevealsRef.current, floatingIconsRef.current);
       if (combat?.progress === 1) activeCombatRef.current = null;
       if (gameRef.current.status !== "running" && !animationsRef.current.size && !combatQueueRef.current.length && !activeCombatRef.current && !transformationsRef.current.size && !activeResourcesRef.current.length && !activeIncomeRef.current.length) {
         animationsFinishedRef.current();
       }
-      if (!cameraRef.current && !animationsRef.current.size && !combatQueueRef.current.length && !activeCombatRef.current && !transformationsRef.current.size && !activeResourcesRef.current.length && !activeIncomeRef.current.length) {
-        if (artRef.current) drawLatest(root, world, app, gameRef.current, selectedRef.current, selectedUnitIdRef.current, artRef.current, zoomRef.current, positions, panRef.current, undefined, selectedCityIdRef.current, languageRef.current, new Map(), revealMapRef.current);
+      if (!cameraRef.current && !animationsRef.current.size && !combatQueueRef.current.length && !activeCombatRef.current && !transformationsRef.current.size && !activeResourcesRef.current.length && !activeIncomeRef.current.length && !fogRevealsRef.current.size) {
+        if (artRef.current) drawLatest(root, world, app, gameRef.current, selectedRef.current, selectedUnitIdRef.current, artRef.current, zoomRef.current, positions, panRef.current, undefined, selectedCityIdRef.current, languageRef.current, new Map(), revealMapRef.current, [], [], undefined, fogRevealsRef.current, floatingIconsRef.current);
         app.ticker.remove(tick);
       }
     };

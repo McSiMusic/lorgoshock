@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createIsometricGrid, fleePosition, initialMapZoom, screenToTile, tileCenter } from "./isometric";
+import { FOG_REVEAL_DURATION, fogRevealAlpha } from "./animation";
 import { MAP_SIZES, type Unit } from "./model";
 import { makeIdentity } from "./names";
 import { unitArtKey, unitPortraitPath } from "./unitArt";
@@ -417,9 +418,14 @@ describe("game rules", () => {
       game.tiles[5 * game.size + 7].terrain = "plain";
       tile.bridge = { axis: "x", faction: "robots" };
       expect(shortestPath(game, { x: 5, y: 5 }, tile, 1)).toEqual([{ x: 6, y: 5 }]);
-      expect(shortestPath(game, { x: 5, y: 4 }, tile, 1)).toBeNull();
+      expect(shortestPath(game, { x: 5, y: 4 }, tile, 1)).toEqual([{ x: 6, y: 5 }]);
       expect(shortestPath(game, tile, { x: 6, y: 6 }, 1)).toBeNull();
       expect(shortestPath(game, tile, { x: 7, y: 5 }, 1)).toEqual([{ x: 7, y: 5 }]);
+      const traveler = game.units[0];
+      Object.assign(traveler, { x: 5, y: 4, moved: false, attacked: false });
+      expect(canMoveTo(game, traveler, tile)).toBe(true);
+      Object.assign(traveler, { x: 6, y: 5 });
+      expect(canMoveTo(game, traveler, { x: 6, y: 6 })).toBe(false);
   });
 
   it("allows three land steps around water including diagonal steps", () => {
@@ -482,13 +488,20 @@ describe("game rules", () => {
     expect(screenToTile(grid, { x: 0, y: 0 })).toBeNull();
   });
 
-  it("uses a larger, tile-sized starting zoom on mobile while preserving desktop scale", () => {
+  it("starts farther out on mobile while preserving desktop scale", () => {
     const grid = createIsometricGrid(360, 500, 16);
     const zoom = initialMapZoom(grid, true);
-    expect(grid.tileWidth * 2 * zoom).toBeCloseTo(120);
+    expect(grid.tileWidth * 2 * zoom).toBeCloseTo(90);
     const largeGrid = createIsometricGrid(390, 600, 32);
-    expect(largeGrid.tileWidth * 2 * initialMapZoom(largeGrid, true)).toBeCloseTo(120);
+    expect(largeGrid.tileWidth * 2 * initialMapZoom(largeGrid, true)).toBeCloseTo(90);
     expect(initialMapZoom(grid, false)).toBe(1.35);
+  });
+
+  it("fades fog out smoothly after a tile is revealed", () => {
+    expect(fogRevealAlpha(0)).toBe(1);
+    expect(fogRevealAlpha(FOG_REVEAL_DURATION / 2)).toBeCloseTo(0.125);
+    expect(fogRevealAlpha(FOG_REVEAL_DURATION)).toBe(0);
+    expect(fogRevealAlpha(FOG_REVEAL_DURATION * 2)).toBe(0);
   });
 
   it("makes a defeated unit flee away from the attacker and off the map", () => {
